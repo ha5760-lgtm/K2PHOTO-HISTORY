@@ -1,6 +1,7 @@
 """
 K2 PHOTO History - 라인 셋업 일일 작업이력 관리
-Confluence 표로 관리하던 일일 작업내용을 간단 입력 → SQLite 자동 저장 → AI 활용(JSONL export)
+Confluence 표(완료여부 | 날짜/근무 | 호기명 | 작업명 | EDM·CTTTM LINK | 작업내용: 1.현상 2.조치사항 3.결론)를
+간단 입력 → SQLite 자동 저장 → AI 활용(JSONL export) 으로 대체
 """
 from flask import Flask, render_template, request, jsonify, Response, send_from_directory
 import sqlite3
@@ -12,6 +13,7 @@ import json as _json
 import uuid
 from datetime import datetime, timedelta, date
 import llm
+from sections import SECTIONS, SECTION_KEYS, parse_sections, compose_content
 
 app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -43,6 +45,18 @@ CATEGORIES = [
 ]
 CATEGORY_CODES = {c[0] for c in CATEGORIES}
 DEFAULT_CATEGORY = 'SIMPLE'
+
+# 완료여부
+STATUSES = [('ongoing', 'On-going'), ('closed', 'Closed')]
+STATUS_CODES = {c for c, _ in STATUSES}
+DEFAULT_STATUS = 'closed'
+
+# 근무조 (code, 시작, 종료) — 3교대. 시작시간으로 자동 판정
+SHIFTS = [('DAY', '06:00', '14:00'), ('SW', '14:00', '22:00'), ('GY', '22:00', '06:00')]
+SHIFT_CODES = {c for c, *_ in SHIFTS}
+SHIFT_ALIASES = {'DAY': 'DAY', 'D': 'DAY', '주간': 'DAY', 'SW': 'SW', 'S': 'SW', '스윙': 'SW',
+                 'GY': 'GY', 'G': 'GY', '야간': 'GY', 'NIGHT': 'GY'}
+
 # 이전 버전(셋업 단계 세분류) → 새 분류 자동 변환
 LEGACY_CATEGORY_MAP = {
     'MOVE_IN': 'SETUP', 'HOOKUP': 'SETUP', 'POWER_ON': 'SETUP', 'SW': 'SETUP', 'CAL': 'SETUP', 'QUAL': 'SETUP',
@@ -87,6 +101,14 @@ def init_db():
             duration_min INTEGER,
             equipment TEXT NOT NULL DEFAULT '공통',
             category TEXT NOT NULL DEFAULT 'SIMPLE',
+            status TEXT NOT NULL DEFAULT 'closed',
+            shift TEXT,
+            title TEXT,
+            title_auto INTEGER DEFAULT 0,
+            link TEXT,
+            symptom TEXT,
+            action TEXT,
+            result TEXT,
             content TEXT NOT NULL,
             summary TEXT,
             summary_auto INTEGER DEFAULT 0,
@@ -110,6 +132,7 @@ def init_db():
     ''')
     for old, new in LEGACY_CATEGORY_MAP.items():
         conn.execute('UPDATE work_logs SET category = ? WHERE category = ?', (new, old))
+    migrate_structured(conn)
     if conn.execute('SELECT COUNT(*) FROM equipment').fetchone()[0] == 0:
         conn.executemany('INSERT INTO equipment (name, vendor, category) VALUES (?, ?, ?)',
                          [(n, vendor_of(n), category_of(n)) for n in DEFAULT_EQUIPMENT])
@@ -117,7 +140,44 @@ def init_db():
     conn.close()
 
 
+NEW_COLUMNS = {'status': "TEXT NOT NULL DEFAULT 'closed'", 'shift': 'TEXT', 'title': 'TEXT', 'title_auto': 'INTEGER DEFAULT 0',
+               'link': 'TEXT', 'symptom': 'TEXT', 'action': 'TEXT', 'result': 'TEXT'}
+
+
+def migrate_structured(conn):
+    """이전 버전(내용+요약) DB → 완료여부/근무/작업명/현상·조치·결론 구조로 변환. 여러 번 실행해도 안전."""
+    cols = {r[1] for r in conn.execute('PRAGMA table_info(work_logs)').fetchall()}
+    for name, ddl in NEW_COLUMNS.items():
+        if name not in cols:
+            conn.execute(f'ALTER TABLE work_logs ADD COLUMN {name} {ddl}')
+    for r in conn.execute('SELECT id, content, summary, summary_auto, start_time FROM work_logs WHERE title IS NULL').fetchall():
+        parsed = parse_sections(r['content']) or {'symptom': (r['content'] or '').strip()}
+        parts = {k: parsed.get(k, '') for k in SECTION_KEYS}
+        conn.execute('UPDATE work_logs SET title = ?, title_auto = ?, shift = COALESCE(shift, ?), '
+                     'symptom = ?, action = ?, result = ? WHERE id = ?',
+                     (r['summary'] or auto_summary(r['content']), r['summary_auto'] or 0, shift_of(r['start_time']),
+                      parts['symptom'], parts['action'], parts['result'], r['id']))
+
+
 # ─── Helpers ──────────────────────────────────────────
+
+def shift_of(start_time):
+    """HH:MM → DAY(06~14) / SW(14~22) / GY(22~06)."""
+    m = re.fullmatch(r'(\d{1,2}):\d{2}', start_time or '')
+    if not m:
+        return None
+    h = int(m[1])
+    for code, start, end in SHIFTS:
+        s, e = int(start[:2]), int(end[:2])
+        if (s <= h < e) if s < e else (h >= s or h < e):
+            return code
+    return None
+
+
+def normalize_shift(value):
+    return SHIFT_ALIASES.get((value or '').strip().upper()) or SHIFT_ALIASES.get((value or '').strip())
+
+
 
 def now_iso():
     return datetime.now().isoformat(timespec='seconds')
@@ -200,18 +260,30 @@ def remove_attachment_files(conn, where, params):
     conn.execute(f'DELETE FROM attachments WHERE {where}', params)
 
 
-def validate_payload(data, partial=False):
+def section_parts(data):
+    """payload → 현상/조치/결론. 구조 필드가 없으면 content(이전 형식/가져오기)를 해석."""
+    if any(k in data for k in SECTION_KEYS):
+        return {k: (data.get(k) or '').strip() for k in SECTION_KEYS}
+    content = (data.get('content') or '').strip()
+    parsed = parse_sections(content) or {'symptom': content}
+    return {k: parsed.get(k, '') for k in SECTION_KEYS}
+
+
+def validate_payload(data):
     errors = []
-    if not partial or 'work_date' in data:
-        try:
-            date.fromisoformat(data.get('work_date') or '')
-        except ValueError:
-            errors.append('날짜 형식이 올바르지 않습니다 (YYYY-MM-DD)')
-    if not partial or 'content' in data:
-        if not (data.get('content') or '').strip():
-            errors.append('작업내용을 입력하세요')
+    try:
+        date.fromisoformat(data.get('work_date') or '')
+    except ValueError:
+        errors.append('날짜 형식이 올바르지 않습니다 (YYYY-MM-DD)')
+    parts = section_parts(data)
+    if not (data.get('title') or data.get('summary') or '').strip() and not any(parts.values()):
+        errors.append('작업명 또는 작업내용을 입력하세요')
     if data.get('category') and data['category'] not in CATEGORY_CODES:
         errors.append('알 수 없는 분류입니다')
+    if data.get('status') and data['status'] not in STATUS_CODES:
+        errors.append('완료여부는 ongoing / closed 중 하나입니다')
+    if data.get('shift') and not normalize_shift(data['shift']):
+        errors.append('근무는 DAY / SW / GY 중 하나입니다')
     for k in ('start_time', 'end_time'):
         v = data.get(k)
         if v and not re.fullmatch(r'([01]\d|2[0-3]):[0-5]\d', v):
@@ -220,25 +292,34 @@ def validate_payload(data, partial=False):
 
 
 def build_record(data):
-    content = data['content'].strip()
-    summary = (data.get('summary') or '').strip()
+    parts = section_parts(data)
+    title = (data.get('title') if 'title' in data else data.get('summary') or '') or ''
+    title = title.strip()
     start, end = data.get('start_time') or None, data.get('end_time') or None
     duration = data.get('duration_min')
     if start and end:
         duration = calc_duration(start, end)
-    return {
+    auto_title = auto_summary(parts['symptom'] or parts['action'] or parts['result'])
+    rec = {
         'work_date': data['work_date'],
+        'status': data.get('status') if data.get('status') in STATUS_CODES else DEFAULT_STATUS,
+        'shift': normalize_shift(data.get('shift')) or shift_of(start),
         'start_time': start,
         'end_time': end,
         'duration_min': int(duration) if duration not in (None, '') else None,
         'equipment': normalize_equipment(data.get('equipment')),
         'category': data.get('category') or DEFAULT_CATEGORY,
-        'content': content,
-        'summary': summary or auto_summary(content),
-        'summary_auto': 0 if summary else 1,
+        'title': title or auto_title,
+        'title_auto': 0 if title else 1,
+        'link': (data.get('link') or '').strip() or None,
+        **parts,
+        'content': compose_content(parts),
         'author': (data.get('author') or '').strip() or None,
         'tags': (data.get('tags') or '').strip() or None,
     }
+    # 이전 버전 호환 컬럼
+    rec['summary'], rec['summary_auto'] = rec['title'], rec['title_auto']
+    return rec
 
 
 def query_logs(args):
@@ -256,12 +337,18 @@ def query_logs(args):
             sql += " AND (',' || REPLACE(equipment, ' ', '') || ',') LIKE ?"; params.append(f'%,{eq},%')
     if args.get('category'):
         sql += ' AND category = ?'; params.append(args['category'])
+    if args.get('status'):
+        sql += ' AND status = ?'; params.append(args['status'])
+    if args.get('shift'):
+        sql += ' AND shift = ?'; params.append(args['shift'])
     if args.get('author'):
         sql += ' AND author = ?'; params.append(args['author'])
     if args.get('q'):
-        sql += ' AND (content LIKE ? OR summary LIKE ? OR tags LIKE ?)'
-        params += [f"%{args['q']}%"] * 3
-    sql += " ORDER BY work_date DESC, COALESCE(start_time, '99:99') DESC, id DESC LIMIT ?"
+        sql += ' AND (title LIKE ? OR content LIKE ? OR link LIKE ? OR tags LIKE ?)'
+        params += [f"%{args['q']}%"] * 4
+    # 같은 날짜 안에서는 근무 GY → SW → DAY (최근 순), 그다음 시작시간
+    sql += (" ORDER BY work_date DESC, CASE shift WHEN 'GY' THEN 0 WHEN 'SW' THEN 1 WHEN 'DAY' THEN 2 ELSE 3 END,"
+            " COALESCE(start_time, '') DESC, id DESC LIMIT ?")
     params.append(min(int(args.get('limit') or 500), 5000))
     conn = get_db()
     rows = attach_files(conn, [row_to_dict(r) for r in conn.execute(sql, params).fetchall()])
@@ -274,7 +361,7 @@ def query_logs(args):
 @app.route('/')
 def index():
     return render_template('index.html', categories=CATEGORIES, common=COMMON,
-                           default_category=DEFAULT_CATEGORY)
+                           default_category=DEFAULT_CATEGORY, shifts=SHIFTS)
 
 
 # ─── Meta ─────────────────────────────────────────────
@@ -292,6 +379,10 @@ def api_meta():
         'authors': authors,
         'categories': [{'code': c, 'label': l, 'icon': i, 'color': col} for c, l, i, col in CATEGORIES],
         'default_category': DEFAULT_CATEGORY,
+        'statuses': [{'code': c, 'label': l} for c, l in STATUSES],
+        'default_status': DEFAULT_STATUS,
+        'shifts': [{'code': c, 'start': st, 'end': en} for c, st, en in SHIFTS],
+        'sections': [{'key': k, 'label': l} for k, l in SECTIONS],
         'common': COMMON,
         'ai_engine': llm.engine_name(),
         'ai_enabled': llm.is_enabled(),
@@ -351,9 +442,15 @@ def api_logs_update(log_id):
         conn.close()
         return jsonify({'error': 'not found'}), 404
     merged = {**dict(row), **{k: v for k, v in data.items() if k != 'attachment_ids'}}
-    # 요약을 비우거나 자동요약 상태였다면 내용 기준으로 다시 자동요약
-    if 'summary' not in data and row['summary_auto']:
-        merged['summary'] = ''
+    # 작업명이 자동 생성 상태였다면 바뀐 내용 기준으로 다시 생성
+    if 'title' not in data and 'summary' not in data and row['title_auto']:
+        merged['title'] = ''
+    elif 'title' not in data and 'summary' in data:
+        merged['title'] = data['summary']
+    # 이전 형식(content 만) 수정 요청이면 구조 필드를 content 에서 다시 해석
+    if 'content' in data and not any(k in data for k in SECTION_KEYS):
+        for k in SECTION_KEYS:
+            merged.pop(k, None)
     errors = validate_payload(merged)
     if errors:
         conn.close()
@@ -451,23 +548,31 @@ def api_version():
 
 @app.route('/api/ai/organize', methods=['POST'])
 def api_ai_organize():
-    """메모 → 개조식 작업내용 / 요약 / 분류 / 호기 / 시간 자동 기입용 결과."""
+    """메모(현상 칸에 대충 적은 내용 등) → 작업명 / 1.현상 2.조치사항 3.결론 / 완료여부 / 근무 / 분류 / 호기 / 링크 자동 기입."""
     data = request.get_json(silent=True) or {}
-    content = (data.get('content') or '').strip()
-    if not content:
+    filled = [(label, (data.get(k) or '').strip()) for k, label in SECTIONS if (data.get(k) or '').strip()]
+    if len(filled) > 1:
+        memo = '\n'.join(f'[{label}] {text}' for label, text in filled)
+    else:
+        memo = filled[0][1] if filled else (data.get('content') or '').strip()
+    if data.get('title'):
+        memo = f"[작업명] {data['title'].strip()}\n{memo}".strip()
+    if not memo:
         return jsonify({'error': '정리할 작업내용을 먼저 입력하세요'}), 400
     conn = get_db()
     known = [r[0] for r in conn.execute('SELECT name FROM equipment WHERE is_active = 1').fetchall()]
     conn.close()
-    result = llm.organize(content, {
+    result = llm.organize(memo, {
         'work_date': data.get('work_date'),
         'equipment': data.get('equipment') or [],
         'category': data.get('category'),
+        'start_time': data.get('start_time'),
         'known_equipment': known,
         'categories': [(c, l) for c, l, *_ in CATEGORIES],
         'default_category': DEFAULT_CATEGORY,
         'common': COMMON,
     })
+    result['shift'] = result.get('shift') or shift_of(result.get('start_time') or data.get('start_time'))
     return jsonify(result)
 
 
@@ -498,6 +603,8 @@ def api_stats():
             c['count'] += 1
             c['minutes'] += r[1] or 0
     no_time = q('SELECT COUNT(*) FROM work_logs WHERE duration_min IS NULL')[0][0]
+    ongoing = q("SELECT COUNT(*) FROM work_logs WHERE status = 'ongoing'")[0][0]
+    by_shift = {r[0]: r[1] for r in q('SELECT shift, COUNT(*) FROM work_logs WHERE work_date >= ? GROUP BY shift', since)}
     conn.close()
     days = [(today - timedelta(days=i)).isoformat() for i in range(13, -1, -1)]
     return jsonify({
@@ -505,6 +612,8 @@ def api_stats():
         'today_count': today_row[0], 'today_minutes': today_row[1],
         'week_count': week_row[0], 'week_minutes': week_row[1],
         'missing_time_count': no_time,
+        'ongoing_count': ongoing,
+        'by_shift': [{'shift': c, 'count': by_shift.get(c, 0)} for c, *_ in SHIFTS],
         'daily': [{'date': d, **daily.get(d, {'count': 0, 'minutes': 0})} for d in days],
         'by_category': by_category,
         'by_equipment': sorted(eq_counts.values(), key=lambda x: -x['count']),
@@ -513,17 +622,20 @@ def api_stats():
 
 # ─── Export / Import ──────────────────────────────────
 
-EXPORT_COLS = [('work_date', '날짜'), ('time', '작업시간'), ('equipment', '설비호기'),
-               ('category', '분류'), ('content', '작업내용'), ('summary', '요약'), ('author', '작성자')]
+# Confluence 표와 같은 순서
+EXPORT_COLS = [('status', '완료여부'), ('date_shift', '날짜/근무'), ('equipment', '호기명'), ('title', '작업명'),
+               ('link', 'EDM CTTTM LINK'), ('content', '작업내용'), ('category', '분류'), ('author', '작성자')]
 CATEGORY_LABEL = {c: l for c, l, *_ in CATEGORIES}
 LABEL_TO_CATEGORY = {l: c for c, l, *_ in CATEGORIES}
+STATUS_LABEL = dict(STATUSES)
 
 
 def export_row(r):
-    t = f"{r['start_time'] or ''}~{r['end_time'] or ''}" if (r['start_time'] or r['end_time']) else ''
-    return {'work_date': r['work_date'], 'time': t, 'equipment': r['equipment'],
-            'category': CATEGORY_LABEL.get(r['category'], r['category']), 'content': r['content'],
-            'summary': r['summary'] or '', 'author': r['author'] or ''}
+    return {'status': STATUS_LABEL.get(r['status'], r['status']),
+            'date_shift': f"{r['work_date']} {r['shift'] or ''}".strip(),
+            'equipment': r['equipment'], 'title': r['title'] or '', 'link': r['link'] or '',
+            'content': r['content'], 'category': CATEGORY_LABEL.get(r['category'], r['category']),
+            'author': r['author'] or ''}
 
 
 @app.route('/api/export.csv')
@@ -547,16 +659,21 @@ def api_export_jsonl():
         t = f" {r['start_time']}~{r['end_time']}" if r['start_time'] and r['end_time'] else ''
         lines.append(_json.dumps({
             'id': f"k2ph-{r['id']}",
+            'status': r['status'],
             'date': r['work_date'],
+            'shift': r['shift'],
+            'title': r['title'],
+            'symptom': r['symptom'], 'action': r['action'], 'result': r['result'],
+            'link': r['link'],
             'start_time': r['start_time'], 'end_time': r['end_time'],
             'duration_min': r['duration_min'],
             'equipment': r['equipment_list'],
             'category': CATEGORY_LABEL.get(r['category'], r['category']),
             'author': r['author'],
-            'summary': r['summary'],
             'images': [a['url'] for a in r['attachments']],
-            'text': f"[{r['work_date']}{t}] [{r['equipment']}] "
-                    f"[{CATEGORY_LABEL.get(r['category'], r['category'])}] {r['content']}",
+            'text': f"[{r['work_date']} {r['shift'] or ''}{t}] [{r['equipment']}] "
+                    f"[{CATEGORY_LABEL.get(r['category'], r['category'])}] [{STATUS_LABEL.get(r['status'])}] "
+                    f"{r['title']}\n{r['content']}",
         }, ensure_ascii=False))
     return Response('\n'.join(lines) + ('\n' if lines else ''), mimetype='application/x-ndjson',
                     headers={'Content-Disposition': 'attachment; filename=k2photo_history.jsonl'})
@@ -581,47 +698,101 @@ def parse_time_range(text):
 
 
 def parse_date(text, default_year):
+    """셀 안의 날짜를 찾아 ISO 로. '2026-10-27', '26.10.27', '10/27 (화) DAY' 등."""
     text = (text or '').strip()
-    for fmt in ('%Y-%m-%d', '%Y.%m.%d', '%Y/%m/%d', '%y.%m.%d', '%y-%m-%d'):
-        try:
-            return datetime.strptime(text.rstrip('.'), fmt).date().isoformat()
-        except ValueError:
-            pass
-    m = re.fullmatch(r'(\d{1,2})[./-](\d{1,2})\.?(?:\s*\(.\))?', text)
-    if m:
-        return date(default_year, int(m[1]), int(m[2])).isoformat()
+    m = re.search(r'(\d{4}|\d{2})[./-](\d{1,2})[./-](\d{1,2})', text)
+    try:
+        if m:
+            y = int(m[1]) + (2000 if len(m[1]) == 2 else 0)
+            return date(y, int(m[2]), int(m[3])).isoformat()
+        m = re.search(r'(?<!\d)(\d{1,2})[./-](\d{1,2})(?!\d)', text) or re.search(r'(\d{1,2})월\s*(\d{1,2})일', text)
+        if m:
+            return date(default_year, int(m[1]), int(m[2])).isoformat()
+    except ValueError:
+        return None
     return None
+
+
+def parse_shift(text):
+    for tok in re.findall(r'[A-Za-z]+|주간|야간|스윙', text or ''):
+        code = normalize_shift(tok)
+        if code and (len(tok) > 1 or len(re.findall(r'[A-Za-z]+', text)) == 1):
+            return code
+    return None
+
+
+def parse_status(text, default=DEFAULT_STATUS):
+    t = (text or '').strip().lower()
+    if re.search(r'on.?going|진행|미완|open|대기', t):
+        return 'ongoing'
+    if re.search(r'close|완료|종료|done', t):
+        return 'closed'
+    return default
+
+
+# 헤더 키워드 → 필드 (앞쪽이 우선: '작업명' 이 '작업내용' 보다 먼저 판정돼야 함)
+HEADER_RULES = [('status', ['완료', '상태', 'status']), ('date', ['날짜', 'date', '일자']), ('shift', ['근무', 'shift']),
+                ('time', ['시간', 'time']), ('equipment', ['호기', '설비', 'eqp']), ('title', ['작업명', '제목', 'title', '요약']),
+                ('link', ['edm', 'ctttm', 'link', '링크']), ('content', ['작업내용', '내용', 'content']),
+                ('category', ['분류', 'category']), ('author', ['작성자', '담당', 'author'])]
+DEFAULT_IMPORT_ORDER = ['status', 'date', 'equipment', 'title', 'link', 'content']
+
+
+def map_header(cells):
+    """헤더 행이면 {열번호: 필드} 반환, 아니면 None. '날짜/근무' 처럼 한 칸에 두 필드면 date 로 두고 shift 도 같이 해석."""
+    mapping = {}
+    for i, c in enumerate(cells):
+        low = (c or '').strip().lower()
+        for field, words in HEADER_RULES:
+            if any(w in low for w in words) and field not in mapping.values():
+                mapping[i] = field
+                break
+    return mapping if len(mapping) >= 2 and ('content' in mapping.values() or 'title' in mapping.values()) else None
+
+
+def table_rows(data):
+    """rows(HTML 표에서 추출한 2차원 배열) 우선, 없으면 탭 구분 텍스트(따옴표 안 줄바꿈 허용)."""
+    if isinstance(data.get('rows'), list):
+        return [[str(c or '') for c in r] for r in data['rows'] if isinstance(r, list)]
+    return [r for r in csv.reader(io.StringIO(data.get('text') or ''), delimiter='\t')]
 
 
 @app.route('/api/import', methods=['POST'])
 def api_import():
-    """Confluence 표를 복사(탭 구분)해서 붙여넣기 → 일괄 등록.
-    컬럼 순서: 날짜 | 작업시간 | 설비호기 | 작업내용 | 요약 (분류/작성자는 옵션 값으로 일괄 지정)
-    날짜 칸이 비어있으면 윗 행 날짜를 이어받음 (Confluence 셀 병합 대응)."""
+    """Confluence 표 붙여넣기 → 일괄 등록.
+    헤더(완료여부 | 날짜/근무 | 호기명 | 작업명 | EDM CTTTM LINK | 작업내용 …)를 자동 인식, 헤더가 없으면 그 순서로 간주.
+    이전 형식(날짜 | 작업시간 | 설비호기 | 작업내용 | 요약)도 헤더로 인식. 날짜 칸이 비면 윗 행 날짜/근무를 이어받음."""
     data = request.get_json(silent=True) or {}
-    text = data.get('text') or ''
     dry_run = bool(data.get('dry_run'))
     year = int(data.get('year') or date.today().year)
-    rows, errors, last_date = [], [], None
-    for n, line in enumerate(text.splitlines(), 1):
-        if not line.strip():
+    category = LABEL_TO_CATEGORY.get(data.get('category'), data.get('category') or DEFAULT_CATEGORY)
+    mapping = None
+    rows, errors, last_date, last_shift = [], [], None, None
+    for n, cells in enumerate(table_rows(data), 1):
+        cells = [c.strip() for c in cells]
+        if not any(cells):
             continue
-        cols = [c.strip() for c in line.split('\t')]
-        if n == 1 and ('날짜' in cols[0] or 'date' in cols[0].lower()):
-            continue  # 헤더 행
-        cols += [''] * (5 - len(cols))
-        d = parse_date(cols[0], year) if cols[0] else last_date
+        if mapping is None:
+            header = map_header(cells)
+            mapping = header or dict(enumerate(DEFAULT_IMPORT_ORDER))
+            if header:
+                continue
+        f = {field: cells[i] if i < len(cells) else '' for i, field in mapping.items()}
+        date_cell = f.get('date', '')
+        d = parse_date(date_cell, year) if date_cell else last_date
         if not d:
-            errors.append(f'{n}행: 날짜를 해석할 수 없습니다 ({cols[0]!r})'); continue
-        if not cols[3]:
-            errors.append(f'{n}행: 작업내용이 비어 있습니다'); continue
-        last_date = d
-        start, end = parse_time_range(cols[1])
+            errors.append(f'{n}행: 날짜를 해석할 수 없습니다 ({date_cell!r})'); continue
+        if not (f.get('content') or f.get('title')):
+            errors.append(f'{n}행: 작업명/작업내용이 비어 있습니다'); continue
+        start, end = parse_time_range(f.get('time') or '')
+        shift = normalize_shift(f.get('shift')) or (parse_shift(date_cell) if date_cell else last_shift) or shift_of(start)
+        last_date, last_shift = d, shift
         rows.append(build_record({
-            'work_date': d, 'start_time': start, 'end_time': end,
-            'equipment': cols[2], 'content': cols[3], 'summary': cols[4],
-            'category': LABEL_TO_CATEGORY.get(data.get('category'), data.get('category') or DEFAULT_CATEGORY),
-            'author': data.get('author'),
+            'work_date': d, 'shift': shift, 'start_time': start, 'end_time': end,
+            'status': parse_status(f.get('status')), 'equipment': f.get('equipment'),
+            'title': f.get('title', ''), 'link': f.get('link'), 'content': f.get('content', ''),
+            'category': LABEL_TO_CATEGORY.get(f.get('category'), category),
+            'author': f.get('author') or data.get('author'),
         }))
     if not dry_run and rows:
         ts = now_iso()

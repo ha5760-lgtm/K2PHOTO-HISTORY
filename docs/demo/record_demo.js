@@ -85,40 +85,43 @@ const overlay = () => {
   const paste = (b64) => p.evaluate((b64) => {
     const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
     const dt = new DataTransfer(); dt.items.add(new File([bin], 'image.png', { type: 'image/png' }));
-    document.querySelector('#entryContent').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    document.querySelector('#entrySymptom').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
   }, b64);
 
   // 1. Work History
   await p.goto(`${BASE}/`, { waitUntil: 'networkidle' });
   await wait(800);
-  await caption('K2 PHOTO History — 라인 셋업 일일 작업이력', 'Confluence 표(날짜 · 작업시간 · 설비호기 · 작업내용 · 요약)를 대체', 2600);
+  await caption('K2 PHOTO History — 작업이력 Confluence 표 대체', '완료여부 · 날짜/근무 · 호기명 · 작업명 · EDM/CTTTM · 작업내용(1.현상 2.조치사항 3.결론)', 2800);
   await click('#globalAuthor', { after: 300 });
   await type('홍길동', 90);
   await caption('작성자 이름은 한 번만 입력하면 브라우저에 기억', '', 1400);
   await p.mouse.move(700, 420, { steps: 15 });
-  await caption('Work History: 날짜별로 묶인 작업 이력 표', '분류별 색 배지 · 호기 배지 · 캡처 썸네일', 2400);
+  await caption('Work History: Confluence 와 같은 열 구성', '넓은 작업내용 칸에 현상 / 조치사항 / 결론을 나눠 표시', 2600);
 
   // 2. 작업 입력 팝업 + 메모 + 캡처 + AI 정리
   await caption('작업 입력 → 팝업에서 바로 입력', '단축키 N 또는 우하단 + 버튼도 동일', 1200);
   await click('#view-history [data-new-log]', { after: 900 });
-  await caption('메모는 대충 적어도 OK', '호기 · 시간 · 내용을 한 줄로', 900);
-  await type('pth7301 10:00-13:30 COT spin motor alarm 발생 설비 down. motor driver 교체 후 복구 dummy 5매 OK. 내일 vendor 원인 분석 회신 예정', 28);
+  await caption('1. 현상 칸에 메모를 대충 몰아서 적기', '호기 · 시간 · 증상 · 한 일 · 결과를 한 줄로', 900);
+  await click('#entrySymptom', { after: 200 });
+  await type('pth7301 22:30-02:00 COT spin motor alarm E-3021 발생 설비 down. motor driver 교체 후 복구 dummy 5매 OK. vendor 원인 분석 회신 대기 CTTTM-240117', 26);
   await wait(500);
   await caption('캡처는 Ctrl+V 로 바로 붙여넣기', '붙이는 즉시 서버에 업로드 → 썸네일에 "저장" 표시', 900);
   await paste(capA);
   await wait(1800);
-  await caption('✨ AI 정리 클릭', '개조식 내용 · 요약 · 분류 · 호기 · 작업시간을 자동 기입', 900);
-  await click('[data-ai]', { after: 2400 });
-  await caption('설비 Down / PTH7301 / 10:00~13:30 / 요약이 채워짐', '이슈 · 후속 조치 목록, 되돌리기 지원 → 확인 후 저장', 3000);
+  await caption('✨ AI 정리 클릭', '작업명 · 현상 / 조치사항 / 결론 · 완료여부 · 근무 · 호기 · 분류 · CTTTM 을 자동 기입', 900);
+  await click('[data-ai]', { after: 2600 });
+  await caption('On-going · GY · PTH7301 · 설비 Down · CTTTM-240117 자동 입력', '현상 / 조치사항 / 결론이 칸별로 나뉨 → 확인 후 저장', 3200);
   await click('#entrySubmit', { after: 1400 });
-  await caption('저장 → DB 자동 저장, 표에 바로 반영', '', 2200);
+  await caption('저장 → DB 자동 저장, 표 맨 위에 On-going 으로 표시', '', 2200);
+  await caption('완료여부 배지를 클릭하면 On-going ↔ Closed 전환', '', 900);
+  await click('#historyBody tr:has-text("Motor driver") .status-pill', { after: 1400 });
 
   // 3. 기존 기록 수정 → 캡처 바로 저장
   await caption('✏️ 수정도 같은 팝업', '기존 기록에 붙인 캡처는 그 자리에서 바로 저장', 1200);
   const row = p.locator('#historyBody tr', { hasText: 'COT spin motor' }).first();
   await row.hover(); await wait(300);
   await click('#historyBody tr:has-text("COT spin motor") [data-edit]', { after: 900 });
-  await click('#entryContent', { dx: 300, dy: 120, after: 300 });
+  await click('#entryResult', { after: 300 });
   await paste(capB);
   await wait(1800);
   await p.keyboard.press('Escape');
@@ -150,18 +153,22 @@ const overlay = () => {
   await wait(2200);
 
   // 6. Daily Log
-  await caption('Daily Log: 화면에서 바로 연속 입력', '시간 프리셋 · 호기 칩 · 분류 · 넓은 작업내용 칸', 1000);
+  await caption('Daily Log: 화면에서 바로 연속 입력', '빠른 문구 버튼으로 현상 / 조치사항 / 결론을 클릭만으로 채우기', 1000);
   await click('[data-view="daily"]', { after: 800 });
-  await click('[data-time-preset="day"]', { after: 500 });
+  await click('#shiftSeg [data-shift="DAY"]', { after: 300 });
   await click('[data-equip="PTA7302"]', { after: 300 });
   await click('#categoryGrid [data-category="PM"]', { after: 300 });
-  await click('#entryContent', { after: 200 });
-  await type('주간 PM: DEV cup 세정, filter 교체, 배기압 확인 OK', 30);
-  await wait(400);
+  await click('#entryTitle', { after: 200 });
+  await type('PTA7302 주간 PM', 45);
+  await click('#entrySymptom', { after: 200 });
+  await type('주간 PM 일정', 45);
+  await click('.sec-action [data-quick="세정"]', { after: 500 });
+  await p.keyboard.type(' (DEV cup), filter 교체', { delay: 35 });
+  await click('.sec-result [data-quick="정상 복구"]', { after: 700 });
   await p.keyboard.press('Control+Enter');
   await wait(1200);
-  await caption('Ctrl+Enter 저장 → 오늘 작업 내역 타임라인에 추가', '다음 작업 시작시간 = 직전 종료시간', 2000);
-  await p.mouse.wheel(0, 500); await wait(1400); await p.mouse.wheel(0, -500); await wait(500);
+  await caption('Ctrl+Enter 저장 → 오늘 작업 내역에 추가', '결론에 "정상 복구" 를 고르면 완료여부가 자동으로 Closed', 2200);
+  await p.mouse.wheel(0, 650); await wait(1600); await p.mouse.wheel(0, -650); await wait(500);
 
   // 7. Setup Dashboard
   await click('[data-view="stats"]', { after: 900 });
@@ -169,11 +176,16 @@ const overlay = () => {
 
   // 8. Confluence 가져오기
   await click('[data-view="io"]', { after: 700 });
-  await caption('기존 Confluence 표 → 복사해서 붙여넣기로 일괄 이관', '병합된 날짜 칸은 윗 행 날짜를 이어받음', 1000);
+  await caption('기존 Confluence 표 → 그대로 복사해서 붙여넣기', '머리글 자동 인식 · 셀 안 줄바꿈 · 병합된 날짜/근무 칸까지 유지', 1000);
   await click('#importText', { after: 200 });
-  await p.fill('#importText', '날짜\t작업시간\t설비호기\t작업내용\t요약\n10/14\t09:00~12:00\tPAH7304\tReticle stage 초기 Cal\tReticle Cal\n\t13:00~16:00\t공통\t셋업 일정 협의 회의\t\n10/15\t08:30~11:00\tPSH7306\tDrain 배관 누수 수리\t누수 수리');
-  await wait(900);
-  await click('#importPreview', { after: 1800 });
+  await p.evaluate(() => {
+    const html = `<table><tr><th>완료여부</th><th>날짜/근무</th><th>호기명</th><th>작업명</th><th>EDM CTTTM LINK</th><th>작업내용</th></tr>
+      <tr><td>Closed</td><td rowspan="2">10/14<br>DAY</td><td>PAH7304</td><td>Reticle stage 초기 Cal</td><td>EDM-50777</td><td><p>1. 현상</p><p>Reticle stage 초기 상태</p><p>2. 조치사항</p><p>Calibration, mark 인식 확인</p><p>3. 결론</p><p>인식률 99.2% 정상</p></td></tr>
+      <tr><td>On-going</td><td>PSH7306</td><td>Drain 배관 누수</td><td></td><td>1. 현상<br>Drain 배관 누수<br>2. 조치사항<br>배관 재체결<br>3. 결론<br>재발 모니터링 필요</td></tr></table>`;
+    const dt = new DataTransfer(); dt.setData('text/html', html); dt.setData('text/plain', 'table');
+    document.querySelector('#importText').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await wait(2200);
   await click('#importRun', { after: 1600 });
   await caption('CSV · JSONL(AI용) · Confluence 마크업으로 내보내기도 가능', '', 1800);
 

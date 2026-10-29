@@ -69,7 +69,7 @@ def test_exports(client):
     jsonl = client.get('/api/export.jsonl').get_data(as_text=True).strip().splitlines()
     assert len(jsonl) == 1 and '"PAA7302"' in jsonl[0]
     conf = client.get('/api/export/confluence').get_data(as_text=True)
-    assert conf.startswith('|| 날짜') and 'A \\| B' in conf
+    assert conf.startswith('|| 완료여부 || 날짜/근무') and 'A \\| B' in conf
     csv_text = client.get('/api/export.csv').get_data(as_text=True)
     assert '작업내용' in csv_text
 

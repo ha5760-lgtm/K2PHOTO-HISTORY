@@ -62,7 +62,8 @@ def test_ai_organize_rule_fallback(client):
     assert r['equipment'] == ['PAA7302']
     assert (r['start_time'], r['end_time']) == ('13:00', '17:30')
     assert r['category'] == 'SETUP'
-    assert '▶ 후속: 내일 재측정 예정' in r['content']
+    assert r['action'].startswith('Wafer stage leveling') and '재측정 예정' in r['result']
+    assert r['status'] == 'ongoing'
     assert client.post('/api/ai/organize', json={'content': ' '}).status_code == 400
 
 
@@ -74,12 +75,14 @@ def test_ai_organize_llm(client, monkeypatch):
     def fake_chat(messages, **kw):
         sent['messages'] = messages
         return '```json\n' + json.dumps({
-            'content': '- Stage leveling 확인', 'summary': 'PAA7302 leveling', 'category': 'SETUP',
+            'title': 'PAA7302 leveling', 'symptom': '', 'action': ['Stage leveling 확인'], 'result': '정상',
+            'status': 'closed', 'category': 'SETUP',
             'equipment': ['paa7302', '엉뚱한값'], 'start_time': '25:00', 'end_time': None,
             'issues': [], 'next_actions': ['재측정']}, ensure_ascii=False) + '\n```'
     monkeypatch.setattr(llm, 'chat', fake_chat)
     r = client.post('/api/ai/organize', json={'content': '메모'}).get_json()
-    assert r['engine'] == 'llm' and r['summary'] == 'PAA7302 leveling'
+    assert r['engine'] == 'llm' and r['title'] == 'PAA7302 leveling'
+    assert r['action'] == '- Stage leveling 확인' and r['status'] == 'closed'
     assert r['equipment'] == ['PAA7302'] and r['start_time'] is None
     assert 'PAA7302' in sent['messages'][1]['content']  # 등록 호기 목록 전달
 

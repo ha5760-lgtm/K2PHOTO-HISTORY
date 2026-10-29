@@ -84,17 +84,42 @@
                     <div class="entry-grid">
                         <div class="entry-meta">
                             <div>
-                                <label class="mini-label">날짜</label>
-                                <div class="input-group input-group-sm">
-                                    <button class="btn btn-outline-secondary" type="button" data-date-shift="-1" title="전날"><i class="bi bi-chevron-left"></i></button>
-                                    <input type="date" class="form-control" name="work_date" id="entryDate" required>
-                                    <span class="input-group-text" id="entryWeekday">-</span>
-                                    <button class="btn btn-outline-secondary" type="button" data-date-shift="1" title="다음날"><i class="bi bi-chevron-right"></i></button>
-                                    <button class="btn btn-outline-secondary" type="button" data-date-shift="today">오늘</button>
+                                <label class="mini-label">완료여부</label>
+                                <div class="seg seg-status" id="statusSeg">
+                                    <button type="button" data-status="ongoing"><i class="bi bi-hourglass-split"></i> On-going</button>
+                                    <button type="button" data-status="closed"><i class="bi bi-check-circle"></i> Closed</button>
                                 </div>
                             </div>
                             <div>
-                                <label class="mini-label">작업시간 <span class="duration-display" id="durationDisplay">-</span></label>
+                                <label class="mini-label">날짜 / 근무</label>
+                                <div class="d-flex gap-2">
+                                    <div class="input-group input-group-sm flex-fill">
+                                        <button class="btn btn-outline-secondary" type="button" data-date-shift="-1" title="전날"><i class="bi bi-chevron-left"></i></button>
+                                        <input type="date" class="form-control" name="work_date" id="entryDate" required>
+                                        <span class="input-group-text" id="entryWeekday">-</span>
+                                        <button class="btn btn-outline-secondary" type="button" data-date-shift="1" title="다음날"><i class="bi bi-chevron-right"></i></button>
+                                        <button class="btn btn-outline-secondary" type="button" data-date-shift="today">오늘</button>
+                                    </div>
+                                </div>
+                                <div class="seg seg-shift mt-1" id="shiftSeg">{% for code, start, end in shifts %}<button type="button" data-shift="{{ code }}" title="{{ start }}~{{ end }}">{{ code }} <small>{{ start[:2] }}~{{ end[:2] }}</small></button>{% endfor %}</div>
+                            </div>
+                            <div>
+                                <label class="mini-label">호기명 <a href="#" class="fw-normal" id="addEquipLink"><i class="bi bi-plus-circle"></i> 추가</a></label>
+                                <div class="chip-group chip-group-sm" id="equipChips"></div>
+                            </div>
+                            <div>
+                                <label class="mini-label">분류</label>
+                                <div class="cat-pills" id="categoryGrid">{% for code, label, icon, color in categories %}<button type="button" class="work-type-btn{% if code == default_category %} active{% endif %}" data-category="{{ code }}" style="--cat: {{ color }}"><i class="bi {{ icon }}"></i>{{ label }}</button>{% endfor %}</div>
+                            </div>
+                            <div>
+                                <label class="mini-label">EDM / CTTTM LINK</label>
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text"><i class="bi bi-link-45deg"></i></span>
+                                    <input type="text" class="form-control" name="link" id="entryLink" placeholder="CTTTM-240117 또는 URL (여러 개는 공백)">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="mini-label">작업시간 <small class="fw-normal">선택 · 입력하면 근무 자동</small> <span class="duration-display" id="durationDisplay">-</span></label>
                                 <div class="d-flex align-items-center gap-1">
                                     <input type="time" class="form-control form-control-sm" name="start_time" id="entryStart">
                                     <span class="text-muted">~</span>
@@ -106,29 +131,31 @@
                                     <button type="button" class="btn btn-outline-secondary" data-dur="60">+1h</button>
                                     <button type="button" class="btn btn-outline-secondary" data-dur="120">+2h</button>
                                     <button type="button" class="btn btn-outline-secondary" data-dur="240">+4h</button>
-                                    <button type="button" class="btn btn-outline-secondary" data-time-preset="day">08~17</button>
                                 </div>
-                            </div>
-                            <div>
-                                <label class="mini-label">설비호기 <a href="#" class="fw-normal" id="addEquipLink"><i class="bi bi-plus-circle"></i> 추가</a></label>
-                                <div class="chip-group chip-group-sm" id="equipChips"></div>
-                            </div>
-                            <div>
-                                <label class="mini-label">분류</label>
-                                <div class="cat-pills" id="categoryGrid">{% for code, label, icon, color in categories %}<button type="button" class="work-type-btn{% if code == default_category %} active{% endif %}" data-category="{{ code }}" style="--cat: {{ color }}"><i class="bi {{ icon }}"></i>{{ label }}</button>{% endfor %}</div>
-                            </div>
-                            <div>
-                                <label class="mini-label">요약 <small class="fw-normal">비우면 첫 줄로 자동</small></label>
-                                <input type="text" class="form-control form-control-sm" name="summary" id="entrySummary" maxlength="120" placeholder="한 줄 요약">
                             </div>
                         </div>
                         <div class="entry-body">
-                            <label class="mini-label">작업내용
-                                <button type="button" class="btn btn-ai" data-ai title="메모를 정리해서 작업내용·요약·분류·호기·시간을 자동 기입 (Alt+A)"><i class="bi bi-stars"></i> AI 정리</button>
+                            <label class="mini-label">작업명
+                                <button type="button" class="btn btn-ai" data-ai title="현상 칸에 대충 적은 메모를 작업명 · 현상 · 조치사항 · 결론 · 완료여부 · 근무 · 호기 · 링크로 자동 정리 (Alt+A)"><i class="bi bi-stars"></i> AI 정리</button>
                             </label>
-                            <div class="body-editor" data-drop>
-                                <textarea class="form-control" name="content" id="entryContent" rows="12" required
-                                    placeholder="대충 적어도 됩니다. 예) paa7302 13:00-17:30 stage leveling 확인 z offset 재조정 내일 재측정&#10;캡처는 여기서 Ctrl+V"></textarea>
+                            <input type="text" class="form-control entry-title" name="title" id="entryTitle" maxlength="120" placeholder="작업명 (비우면 현상 첫 줄로 자동)">
+                            <label class="mini-label mt-2">작업내용 <small class="fw-normal">메모를 1번 칸에 몰아 적고 AI 정리를 눌러도 됩니다</small></label>
+                            <div class="body-editor sections-editor" data-drop>
+                                <div class="sec sec-symptom">
+                                    <div class="sec-head"><span class="sec-no">1</span> 현상
+                                        <span class="sec-quick" data-for="entrySymptom">{% for q in ['알람 발생', '설비 Down', '순간정지', 'Spec-out', '작업 요청'] %}<button type="button" data-quick="{{ q }}">{{ q }}</button>{% endfor %}</span></div>
+                                    <textarea class="form-control" id="entrySymptom" rows="2" placeholder="무엇이 언제 어떻게 발생했나 · 예) 10:20 COT spin motor alarm (E-3021) 발생 → 설비 Down"></textarea>
+                                </div>
+                                <div class="sec sec-action">
+                                    <div class="sec-head"><span class="sec-no">2</span> 조치사항
+                                        <span class="sec-quick" data-for="entryAction">{% for q in ['부품 교체', '리셋', 'Calibration', '세정', 'Vendor 지원'] %}<button type="button" data-quick="{{ q }}">{{ q }}</button>{% endfor %}</span></div>
+                                    <textarea class="form-control" id="entryAction" rows="2" placeholder="실제로 한 작업 · 예) - Motor driver 교체&#10;- Dummy 5매 확인"></textarea>
+                                </div>
+                                <div class="sec sec-result">
+                                    <div class="sec-head"><span class="sec-no">3</span> 결론
+                                        <span class="sec-quick" data-for="entryResult">{% for q, st in [('정상 복구', 'closed'), ('생산 재개', 'closed'), ('모니터링 중', 'ongoing'), ('Vendor 회신 대기', 'ongoing'), ('재발 시 재점검', '')] %}<button type="button" data-quick="{{ q }}" {% if st %}data-quick-status="{{ st }}"{% endif %}>{{ q }}</button>{% endfor %}</span></div>
+                                    <textarea class="form-control" id="entryResult" rows="2" placeholder="결과와 현재 상태 · 예) 정상 복구, 생산 재개 / Vendor 원인 분석 회신 대기"></textarea>
+                                </div>
                                 <div class="attach-strip" id="entryAttachments"></div>
                                 <div class="body-editor-foot"><i class="bi bi-clipboard-plus"></i> 캡처 <kbd>Ctrl</kbd>+<kbd>V</kbd> · 드래그&amp;드롭 → 즉시 서버 저장</div>
                             </div>
@@ -168,21 +195,24 @@
         </div>
         <div class="card shadow-sm mb-4">
             <div class="card-body">
-                <form class="row g-3 align-items-end" id="filterForm">
-                    <div class="col-md-2"><label class="form-label small">From</label><input type="date" name="date_from" class="form-control form-control-sm"></div>
-                    <div class="col-md-2"><label class="form-label small">To</label><input type="date" name="date_to" class="form-control form-control-sm"></div>
-                    <div class="col-md-2"><label class="form-label small">설비호기</label><select name="equipment" class="form-select form-select-sm" id="filterEquip"><option value="">전체</option></select></div>
-                    <div class="col-md-2"><label class="form-label small">분류</label><select name="category" class="form-select form-select-sm" id="filterCategory"><option value="">전체</option></select></div>
-                    <div class="col-md-2"><label class="form-label small">검색어</label><input type="text" name="q" class="form-control form-control-sm" id="filterQ" placeholder="내용/요약"></div>
-                    <div class="col-md-2 d-flex gap-2">
+                <form class="row g-2 align-items-end" id="filterForm">
+                    <div class="col-6 col-md"><label class="form-label small">From</label><input type="date" name="date_from" class="form-control form-control-sm"></div>
+                    <div class="col-6 col-md"><label class="form-label small">To</label><input type="date" name="date_to" class="form-control form-control-sm"></div>
+                    <div class="col-6 col-md"><label class="form-label small">완료여부</label><select name="status" class="form-select form-select-sm" id="filterStatus"><option value="">전체</option><option value="ongoing">On-going</option><option value="closed">Closed</option></select></div>
+                    <div class="col-6 col-md"><label class="form-label small">근무</label><select name="shift" class="form-select form-select-sm" id="filterShift"><option value="">전체</option>{% for code, start, end in shifts %}<option>{{ code }}</option>{% endfor %}</select></div>
+                    <div class="col-6 col-md"><label class="form-label small">호기명</label><select name="equipment" class="form-select form-select-sm" id="filterEquip"><option value="">전체</option></select></div>
+                    <div class="col-6 col-md"><label class="form-label small">분류</label><select name="category" class="form-select form-select-sm" id="filterCategory"><option value="">전체</option></select></div>
+                    <div class="col-8 col-md-3"><label class="form-label small">검색어</label><input type="text" name="q" class="form-control form-control-sm" id="filterQ" placeholder="작업명 / 내용 / CTTTM"></div>
+                    <div class="col-4 col-md-auto d-flex gap-2">
                         <button type="submit" class="btn btn-sm btn-primary flex-fill"><i class="bi bi-funnel"></i> 조회</button>
                         <button type="button" class="btn btn-sm btn-outline-secondary" id="filterReset"><i class="bi bi-x-lg"></i></button>
                     </div>
-                    <div class="col-12 d-flex flex-wrap gap-2">
+                    <div class="col-12 d-flex flex-wrap gap-2 mt-2">
                         <button type="button" class="btn btn-sm btn-light" data-range="7">최근 7일</button>
                         <button type="button" class="btn btn-sm btn-light" data-range="30">최근 30일</button>
                         <button type="button" class="btn btn-sm btn-light" data-range="week">이번 주</button>
                         <button type="button" class="btn btn-sm btn-light" data-range="all">전체</button>
+                        <button type="button" class="btn btn-sm btn-outline-warning" data-range="ongoing"><i class="bi bi-hourglass-split"></i> On-going 만</button>
                         <span class="ms-auto small text-muted align-self-center" id="historyCount"></span>
                     </div>
                 </form>
@@ -191,18 +221,10 @@
         <div class="card shadow-sm">
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0 history-table">
+                    <table class="table table-hover mb-0 history-table">
+                        <colgroup><col style="width:92px"><col style="width:96px"><col style="width:104px"><col style="width:220px"><col style="width:118px"><col><col style="width:44px"></colgroup>
                         <thead class="table-light">
-                            <tr>
-                                <th style="width:120px">날짜</th>
-                                <th style="width:120px">작업시간</th>
-                                <th style="width:150px">설비호기</th>
-                                <th style="width:110px">분류</th>
-                                <th>작업내용</th>
-                                <th style="width:22%">요약</th>
-                                <th style="width:80px">작성자</th>
-                                <th style="width:70px"></th>
-                            </tr>
+                            <tr><th>완료여부</th><th>날짜/근무</th><th>호기명</th><th>작업명</th><th>EDM / CTTTM</th><th>작업내용 <small class="text-muted fw-normal">1. 현상 · 2. 조치사항 · 3. 결론</small></th><th></th></tr>
                         </thead>
                         <tbody id="historyBody"></tbody>
                     </table>
@@ -217,7 +239,7 @@
             <div class="col-md-3"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="bi bi-journal-text"></i></div><div><div class="kpi-value" id="kTotal">0</div><div class="kpi-label">누적 작업 건수</div></div></div></div>
             <div class="col-md-3"><div class="kpi-card kpi-green"><div class="kpi-icon"><i class="bi bi-hourglass-split"></i></div><div><div class="kpi-value" id="kTotalHours">0h</div><div class="kpi-label">누적 작업시간</div></div></div></div>
             <div class="col-md-3"><div class="kpi-card kpi-amber"><div class="kpi-icon"><i class="bi bi-calendar-week"></i></div><div><div class="kpi-value" id="kWeek">0</div><div class="kpi-label">이번 주 건수 / 시간</div></div></div></div>
-            <div class="col-md-3"><div class="kpi-card kpi-red"><div class="kpi-icon"><i class="bi bi-exclamation-triangle"></i></div><div><div class="kpi-value" id="kMissing">0</div><div class="kpi-label">작업시간 미입력</div></div></div></div>
+            <div class="col-md-3"><div class="kpi-card kpi-red clickable" data-goto-ongoing title="On-going 목록 보기"><div class="kpi-icon"><i class="bi bi-hourglass-split"></i></div><div><div class="kpi-value" id="kOngoing">0</div><div class="kpi-label">On-going (미완료)</div></div></div></div>
         </div>
         <div class="row g-4">
             <div class="col-lg-8"><div class="card shadow-sm h-100"><div class="card-header fw-semibold">최근 14일 작업 추이</div><div class="card-body"><div class="chart-box"><canvas id="chartDaily"></canvas></div></div></div></div>
@@ -233,8 +255,10 @@
                 <div class="card shadow-sm">
                     <div class="card-header fw-semibold"><i class="bi bi-box-arrow-in-down me-1"></i> Confluence 표 가져오기</div>
                     <div class="card-body">
-                        <p class="small text-muted mb-2">Confluence 페이지의 표를 드래그 복사해서 붙여넣으세요. 컬럼 순서: <b>날짜 | 작업시간 | 설비호기 | 작업내용 | 요약</b>. 날짜 셀이 병합돼 비어 있으면 윗 행 날짜를 이어받습니다.</p>
-                        <textarea class="form-control font-mono mb-3" id="importText" rows="9" placeholder="10/27&#9;09:00~11:30&#9;PAA7302&#9;Wafer stage leveling 확인&#9;leveling 확인&#10;&#9;13:00~17:00&#9;공통&#9;Hook-up 점검 회의&#9;"></textarea>
+                        <p class="small text-muted mb-2">Confluence 페이지의 표를 <b>머리글 행까지</b> 드래그 복사해서 아래에 붙여넣으세요. 셀 안 줄바꿈·병합 셀까지 그대로 인식합니다.<br>
+                        머리글로 열을 자동 판단: <b>완료여부 | 날짜/근무 | 호기명 | 작업명 | EDM CTTTM LINK | 작업내용</b> (작업내용의 1. 현상 / 2. 조치사항 / 3. 결론 자동 분리). 이전 형식(날짜 | 작업시간 | 설비호기 | 작업내용 | 요약)도 지원.</p>
+                        <textarea class="form-control font-mono mb-3" id="importText" rows="9" placeholder="Confluence 표를 여기에 붙여넣기 (Ctrl+V)"></textarea>
+                        <div class="small text-primary mb-2" id="importInfo"></div>
                         <div class="row g-2 align-items-end">
                             <div class="col-sm-3"><label class="form-label small">기준 연도</label><input type="number" class="form-control form-control-sm" id="importYear"></div>
                             <div class="col-sm-4"><label class="form-label small">분류 일괄 지정</label><select class="form-select form-select-sm" id="importCategory"></select></div>

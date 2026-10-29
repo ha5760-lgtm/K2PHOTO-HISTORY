@@ -400,7 +400,7 @@ body {
 
 /* 이력 표 (Confluence 표 대체) */
 .history-table td { font-size: 0.85rem; vertical-align: top; }
-.history-table td.content-cell { white-space: pre-wrap; }
+.history-table td.content-cell { white-space: normal; }
 .history-table tr.date-first td { border-top: 2px solid var(--border-color); }
 .history-table td.date-cell { font-weight: 600; white-space: nowrap; }
 .history-table td.date-cell small { display: block; font-weight: 400; color: var(--text-secondary); }
@@ -547,9 +547,6 @@ mark { padding: 0 2px; background: rgba(255,209,102,0.5); border-radius: 2px; }
 .mini-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .74rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px; }
 .mini-label small, .mini-label a { font-size: .72rem; }
 .entry-body { display: flex; flex-direction: column; min-width: 0; }
-.entry-body .body-editor { flex: 1; display: flex; flex-direction: column; }
-.entry-body textarea { flex: 1; min-height: 300px; font-size: .92rem; line-height: 1.65; }
-.modal .entry-body textarea { min-height: 440px; }
 .time-presets { display: flex; flex-wrap: wrap; gap: 4px; }
 .time-presets .btn { --bs-btn-padding-y: .12rem; --bs-btn-padding-x: .5rem; --bs-btn-font-size: .72rem; }
 .mini-label .duration-display { padding: 1px 8px; font-size: .72rem; }
@@ -563,7 +560,7 @@ mark { padding: 0 2px; background: rgba(255,209,102,0.5); border-radius: 2px; }
 .entry-actions #draftNote { font-size: .74rem; }
 .modal .entry-actions { position: sticky; bottom: -16px; background: var(--bg-card); padding-bottom: 4px; }
 .entry-card .card-header kbd, .modal-header kbd { font-size: .68rem; padding: 1px 4px; color: var(--text-secondary); background: var(--bg-body); border: 1px solid var(--border-color); box-shadow: none; }
-@media (max-width: 991px) { .entry-grid { grid-template-columns: 1fr; } .entry-body textarea { min-height: 220px; } }
+@media (max-width: 991px) { .entry-grid { grid-template-columns: 1fr; } }
 
 /* FAB */
 .fab-button {
@@ -583,3 +580,54 @@ mark { padding: 0 2px; background: rgba(255,209,102,0.5); border-radius: 2px; }
 .cat-pills .work-type-btn:hover { border-color: var(--cat); color: var(--cat); }
 .cat-pills .work-type-btn.active { border-color: var(--cat); color: var(--cat); background: color-mix(in srgb, var(--cat) 12%, transparent); }
 .topbar-title { white-space: nowrap; }
+
+/* ============ Confluence 형식: 완료여부 / 근무 / 작업명 / 현상·조치·결론 ============ */
+.seg-status button.active[data-status="ongoing"] { color: #b45309; background: #fff7e6; }
+.seg-status button.active[data-status="closed"] { color: #047857; background: #e8faf3; }
+[data-bs-theme="dark"] .seg-status button.active[data-status="ongoing"] { background: rgba(245,158,11,.18); color: #fbbf24; }
+[data-bs-theme="dark"] .seg-status button.active[data-status="closed"] { background: rgba(6,214,160,.15); color: #34d399; }
+.seg-shift button small { font-size: .62rem; opacity: .7; }
+.entry-title { font-weight: 600; font-size: .95rem; }
+
+.sections-editor { padding: 4px 0 0; }
+.sec { padding: 8px 12px 4px; border-bottom: 1px dashed var(--border-color); }
+.sec-head { display: flex; align-items: center; gap: 6px; font-size: .78rem; font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
+.sec-no { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    font-size: .68rem; color: #fff; background: var(--sec-color, var(--primary)); }
+.sec-symptom { --sec-color: #ef476f; } .sec-action { --sec-color: var(--primary); } .sec-result { --sec-color: #06a77d; }
+.sec-quick { margin-left: auto; display: flex; flex-wrap: wrap; gap: 3px; justify-content: flex-end; }
+.sec-quick button { border: 1px solid var(--border-color); background: var(--bg-body); color: var(--text-secondary); border-radius: 12px;
+    font-size: .66rem; font-weight: 500; padding: 0 7px; line-height: 1.6; }
+.sec-quick button:hover { border-color: var(--sec-color); color: var(--sec-color); }
+.sections-editor .sec textarea { min-height: 62px; resize: vertical; overflow: hidden; font-size: .9rem; line-height: 1.6; padding: 4px 2px; }
+.modal .sections-editor .sec textarea { min-height: 96px; }
+
+.status-pill { display: inline-flex; align-items: center; gap: 4px; border: none; border-radius: 20px; padding: 2px 9px;
+    font-size: .72rem; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.status-pill.ongoing { background: #fff1d6; color: #b45309; }
+.status-pill.closed { background: #e3f8ef; color: #047857; }
+[data-bs-theme="dark"] .status-pill.ongoing { background: rgba(245,158,11,.18); color: #fbbf24; }
+[data-bs-theme="dark"] .status-pill.closed { background: rgba(6,214,160,.15); color: #34d399; }
+.status-pill:hover { filter: brightness(.95); }
+.shift-badge { display: inline-block; font-size: .66rem; font-weight: 700; border-radius: 4px; padding: 0 5px; letter-spacing: .03em; }
+.shift-DAY { background: #fff4c2; color: #8a6d00; } .shift-SW { background: #ffe1cc; color: #b45309; } .shift-GY { background: #e0e3ff; color: #3730a3; }
+[data-bs-theme="dark"] .shift-badge { filter: brightness(.8); }
+.link-chip { display: inline-flex; align-items: center; gap: 2px; font-size: .72rem; font-family: ui-monospace, Consolas, monospace;
+    background: var(--bg-body); border: 1px solid var(--border-color); border-radius: 6px; padding: 0 5px; margin: 0 3px 3px 0; color: var(--text-primary);
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
+a.link-chip { color: var(--primary); }
+
+/* 작업이력 표: 작업내용 칸을 넓게 */
+.history-table { table-layout: fixed; }
+.history-table td { vertical-align: top; }
+.history-table .title-cell { font-weight: 600; line-height: 1.4; }
+.history-table tr.row-ongoing td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
+.sections-view { display: grid; gap: 4px; }
+.sv { display: grid; grid-template-columns: 74px 1fr; gap: 8px; }
+.sv-label { font-size: .72rem; font-weight: 700; color: var(--sv-color); white-space: nowrap; padding-top: 1px; }
+.sv-symptom { --sv-color: #e11d48; } .sv-action { --sv-color: var(--primary); } .sv-result { --sv-color: #047857; }
+.sv-text { white-space: pre-wrap; font-size: .85rem; line-height: 1.55; word-break: break-word; }
+.timeline-item .sections-view { margin-top: 4px; }
+.kpi-card.clickable { cursor: pointer; }
+.import-preview { table-layout: auto; }
+#filterForm .col-md { min-width: 118px; }

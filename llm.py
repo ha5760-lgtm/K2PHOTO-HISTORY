@@ -9,6 +9,8 @@ import re
 import urllib.error
 import urllib.request
 
+from sections import parse_sections
+
 EQUIP_RE = re.compile(r'\bP[A-Z]{2}\d{4}\b')
 TIME_RE = re.compile(r'(\d{1,2}):?(\d{2})\s*[~\-–]\s*(\d{1,2}):?(\d{2})')
 HHMM_RE = re.compile(r'([01]\d|2[0-3]):[0-5]\d')
@@ -78,6 +80,64 @@ def guess_category(text, default='SIMPLE'):
     return best
 
 
+ACTION_RE = re.compile(r'교체|조치|조정|리셋|reset|세정|청소|클리닝|cleaning|재시작|restart|재기동|보정|수리|교환|설치|연결|변경|'
+                       r'투입|실시|적용|점검|tuning|튜닝|조임|재장착|재부팅|reboot|clean|download|등록|삭제|업데이트|update', re.I)
+RESULT_RE = re.compile(r'정상|복구|완료|\bOK\b|spec.?in|해결|예정|대기|모니터링|필요|재발|회신|생산 재개|양호|이상 ?없음|\bpass\b|'
+                       r'추후|내일|재측정|결론', re.I)
+PENDING_RE = re.compile(r'예정|대기|모니터링|필요|재발 시|미완|진행 ?중|회신|follow|추후|내일|재측정|확인 중|open', re.I)
+CLOSED_RE = re.compile(r'정상|복구|완료|\bOK\b|spec.?in|해결|생산 재개|양호|이상 ?없음|\bpass\b|close', re.I)
+LINK_RE = re.compile(r'https?://\S+|\b(?:CTTTM|EDM)[-_ #]?\w*\d+\w*\b', re.I)
+
+
+def _join(lines):
+    lines = [l for l in lines if l]
+    if len(lines) <= 1:
+        return lines[0] if lines else ''
+    return '\n'.join(f'- {l}' for l in lines)
+
+
+def classify_sentences(lines):
+    """문장 단위로 현상 / 조치사항 / 결론 분류. 'A 교체 후 복구' 처럼 섞인 문장은 '후' 에서 나눔."""
+    parts = {'symptom': [], 'action': [], 'result': []}
+    for line in lines:
+        has_a, has_r = bool(ACTION_RE.search(line)), bool(RESULT_RE.search(line))
+        m = re.search(r'^(.*\S)\s+후[,\s]+(.+)$', line)
+        chunks = [c.strip() for c in re.split(r',\s+', line) if c.strip()]
+        if has_a and has_r and m and ACTION_RE.search(m[1]) and RESULT_RE.search(m[2]):
+            parts['action'].append(m[1].strip())
+            parts['result'].append(m[2].strip(' ,'))
+        elif has_a and has_r and len(chunks) > 1:
+            # 'A 확인, B 재조정, spec-in 확인' → 쉼표 단위로 다시 분류
+            sub = classify_sentences(chunks)
+            for k in parts:
+                if sub[k]:
+                    parts[k].append(', '.join(sub[k]))
+        elif has_r and (PENDING_RE.search(line) or not has_a):
+            parts['result'].append(line)
+        elif has_a and (parts['symptom'] or parts['action'] or len(lines) == 1 or not re.search(r'발생|알람|alarm|에러|error|down|불량|이상', line, re.I)):
+            parts['action'].append(line)
+        else:
+            parts['symptom'].append(line)
+    return parts
+
+
+def short_title(text, limit=40):
+    """단어 경계에서 자르기 (말줄임표 없이)."""
+    text = re.sub(r'\s+', ' ', text or '').strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(' ', 1)[0]
+    return cut if len(cut) >= limit // 2 else text[:limit]
+
+
+def judge_status(text, default=None):
+    if PENDING_RE.search(text or ''):
+        return 'ongoing'
+    if CLOSED_RE.search(text or ''):
+        return 'closed'
+    return default
+
+
 def rule_organize(content, known_equipment=(), category=None):
     text = content or ''
     found = list(dict.fromkeys(EQUIP_RE.findall(text.upper())))
@@ -85,46 +145,64 @@ def rule_organize(content, known_equipment=(), category=None):
     start = end = None
     if m and int(m[1]) < 24 and int(m[3]) < 24:
         start, end = f'{int(m[1]):02d}:{m[2]}', f'{int(m[3]):02d}:{m[4]}'
-    # 호기명·시간은 별도 필드로 빠지므로 본문에서 제거
+    links = list(dict.fromkeys(LINK_RE.findall(text)))
+    # 호기명·시간·링크는 별도 필드로 빠지므로 본문에서 제거
     stripped = TIME_RE.sub(' ', text)
+    for l in links:
+        stripped = stripped.replace(l, ' ')
     stripped = re.sub(r'\bP[A-Z]{2}\d{4}\b\s*[:,]?', ' ', stripped, flags=re.I) if found else stripped
-    lines = [l[0].upper() + l[1:] for l in _bulletize(stripped)] or _bulletize(text)
-    follow = [l for l in lines if re.search(r'예정|필요|요청|내일|확인 필요|대기|follow', l, re.I)]
-    issues = [l for l in lines if re.search(r'이슈|문제|불량|알람|alarm|에러|error|낮음|높음|누수|지연|fail|spec-out|spec out', l, re.I)
-              or re.search(r'\bNG\b', l)]
-    body = [l for l in lines if l not in follow]
-    organized = '\n'.join(f'- {l}' for l in body)
-    if follow:
-        organized += ('\n' if organized else '') + '\n'.join(f'▶ 후속: {l}' for l in follow)
-    summary = (body or lines or [''])[0]
-    if found:
-        summary = f"{', '.join(found[:2])} {summary}"
-    if len(summary) > 40:
-        summary = summary[:39] + '…'
+    cap = lambda l: l[0].upper() + l[1:] if l else l
+    given = parse_sections(stripped)
+    title = ''
+    if given:
+        # 사용자가 이미 칸을 나눠 썼으면 그 구분을 존중하고 정리만 함
+        title = re.sub(r'\s+', ' ', given.pop('title', '') or '').strip()
+        parts = {k: [cap(l) for l in _bulletize(v)] for k, v in given.items()}
+        if not parts['action'] and not parts['result'] and parts['symptom']:
+            parts = classify_sentences(parts['symptom'])
+    else:
+        parts = classify_sentences([cap(l) for l in _bulletize(stripped)] or _bulletize(text))
+    follow = [l for l in parts['result'] if PENDING_RE.search(l)]
+    if not title:
+        # Confluence 작업명처럼 '호기 + 한 일' (조치가 있으면 조치, 없으면 현상)
+        head = (parts['action'] or parts['symptom'] or parts['result'] or [''])[0]
+        head = re.split(r',\s|\s후\s|→', head)[0].strip()
+        title = f"{', '.join(found[:2])} {head}".strip() if found else head
+    title = short_title(title)
     return {
-        'content': organized or text.strip(),
-        'summary': summary,
+        'title': title,
+        'symptom': _join(parts['symptom']),
+        'action': _join(parts['action']),
+        'result': _join(parts['result']),
+        'status': judge_status(' '.join(parts['result']) or text),
         'category': guess_category(text, category or 'SIMPLE'),
         'equipment': found,
+        'link': ' '.join(links),
         'start_time': start, 'end_time': end,
-        'issues': issues, 'next_actions': follow,
+        'next_actions': follow,
     }
 
 
 # ─── LLM ──────────────────────────────────────────────
 
-SYSTEM_PROMPT = """너는 삼성 반도체 K2 라인 포토(노광) 설비 셋업 엔지니어의 작업일지 정리 도우미다.
-사용자가 대충 적은 메모를 Confluence 작업일지 한 행으로 정리한다.
+SYSTEM_PROMPT = """너는 삼성 반도체 K2 라인 포토(노광) 설비 엔지니어의 작업이력 정리 도우미다.
+사용자가 대충 적은 메모를 Confluence 작업이력 표 한 행(완료여부 | 날짜/근무 | 호기명 | 작업명 | EDM CTTTM LINK | 작업내용)으로 정리한다.
+작업내용은 반드시 1. 현상 / 2. 조치사항 / 3. 결론 세 칸으로 나눈다.
 규칙:
-- 사실만 정리하고 없는 내용을 지어내지 않는다. 수치·호기명·부품명·벤더명은 원문 그대로 유지.
-- content: 핵심 작업을 "- " 로 시작하는 간결한 개조식 줄로. 후속 조치/예정 사항은 "▶ 후속: " 으로 시작하는 줄로 맨 아래에.
-- summary: 40자 이내 한 줄 요약 (명사형 종결, 예: "PAA7302 Stage leveling 1차 spec-in").
+- 사실만 정리하고 없는 내용을 지어내지 않는다. 수치·호기명·부품명·알람코드·벤더명은 원문 그대로 유지. 해당 내용이 없으면 빈 문자열.
+- title: 작업명. 30자 이내, 명사형 (예: "PTH7301 COT spin motor 교체").
+- symptom: 1. 현상 — 무엇이 언제 어떻게 발생했나 (알람, 불량, 요청 배경).
+- action: 2. 조치사항 — 실제로 한 작업. 여러 개면 "- " 개조식 줄.
+- result: 3. 결론 — 결과와 현재 상태, 남은 후속 조치 (예: "정상 복구, 생산 재개" / "Vendor 원인 분석 회신 대기").
+- status: 결론 기준으로 끝났으면 "closed", 후속 조치·모니터링·회신 대기가 남았으면 "ongoing".
 - category: 다음 코드 중 하나 (설명 참고)
 {categories}
 - equipment: 본문에 등장한 설비호기 목록 (예: PAA7302). 특정 호기가 없으면 ["공통"].
+- link: 본문에 있는 EDM / CTTTM 번호나 URL (없으면 빈 문자열).
 - start_time / end_time: 본문에 작업시간이 있으면 "HH:MM", 없으면 null.
-- issues: 문제/이상 사항 목록, next_actions: 후속 조치 목록 (없으면 빈 배열).
-반드시 JSON 객체 하나만 출력한다. 키: content, summary, category, equipment, start_time, end_time, issues, next_actions"""
+- next_actions: 남은 후속 조치 목록 (없으면 빈 배열).
+입력에 [현상] [조치사항] [결론] [작업명] 표시가 있으면 사용자가 나눈 구분을 우선 존중한다.
+반드시 JSON 객체 하나만 출력한다. 키: title, symptom, action, result, status, category, equipment, link, start_time, end_time, next_actions"""
 
 
 def _extract_json(text):
@@ -163,6 +241,7 @@ def llm_organize(content, context):
             f"현재 선택된 설비호기: {', '.join(context.get('equipment') or []) or '없음'}\n"
             f"등록된 설비호기: {', '.join(context.get('known_equipment') or [])}\n"
             f"현재 분류: {context.get('category') or '-'}\n"
+            f"현재 작업시간: {context.get('start_time') or '-'}\n"
             f"--- 메모 ---\n{content}")
     raw = chat([{'role': 'system', 'content': SYSTEM_PROMPT.format(categories=categories)},
                 {'role': 'user', 'content': user}])
@@ -177,8 +256,15 @@ def _clean(result, fallback, category_codes, common):
             v = [v]
         return [str(x).strip() for x in (v or []) if str(x).strip()]
 
-    content = str(result.get('content') or '').strip() or fallback['content']
-    summary = str(result.get('summary') or '').strip() or fallback['summary']
+    def text(key):
+        v = result.get(key)
+        if isinstance(v, list):
+            v = '\n'.join(f'- {x}' for x in str_list(v))
+        return str(v or '').strip()
+
+    sections = {k: text(k) for k in ('symptom', 'action', 'result')}
+    if not any(sections.values()):
+        sections = {k: fallback[k] for k in sections}
     category = result.get('category') if result.get('category') in category_codes else fallback['category']
     equipment = [e.upper() if e != common else common for e in str_list(result.get('equipment'))]
     equipment = [e for e in equipment if e == common or EQUIP_RE.fullmatch(e)]
@@ -186,9 +272,10 @@ def _clean(result, fallback, category_codes, common):
     for k in ('start_time', 'end_time'):
         v = result.get(k)
         times[k] = v if isinstance(v, str) and HHMM_RE.fullmatch(v) else None
-    return {'content': content, 'summary': summary[:120], 'category': category,
-            'equipment': list(dict.fromkeys(equipment)), **times,
-            'issues': str_list(result.get('issues')), 'next_actions': str_list(result.get('next_actions'))}
+    status = result.get('status') if result.get('status') in ('ongoing', 'closed') else fallback['status']
+    return {'title': (text('title') or fallback['title'])[:120], **sections, 'status': status,
+            'category': category, 'equipment': list(dict.fromkeys(equipment)), 'link': text('link') or fallback['link'],
+            **times, 'next_actions': str_list(result.get('next_actions'))}
 
 
 def organize(content, context):

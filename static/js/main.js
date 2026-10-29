@@ -5,6 +5,9 @@ const state = {
     meta: { equipment: [], categories: [], authors: [] },
     selectedEquip: new Set(),
     category: 'SIMPLE',
+    status: 'closed',      // 완료여부 (ongoing / closed)
+    shift: null,           // 근무 (DAY / SW / GY)
+    shiftManual: false,    // 근무를 직접 골랐으면 시작시간으로 자동 변경하지 않음
     editingId: null,       // 입력 폼으로 수정 중인 기록 id (Daily Log 인라인 또는 팝업)
     dayLogs: [],
     historyLogs: [],
@@ -141,6 +144,58 @@ function toggleEquip(name) {
     saveDraft();
 }
 
+// 작업내용 3단 (1. 현상 / 2. 조치사항 / 3. 결론)
+const SECTION_FIELDS = { symptom: '#entrySymptom', action: '#entryAction', result: '#entryResult' };
+const STATUS_LABEL = { ongoing: 'On-going', closed: 'Closed' };
+const SECTION_LABEL = { symptom: '현상', action: '조치사항', result: '결론' };
+
+function shiftOf(time) {
+    const m = /^(\d{1,2}):\d{2}$/.exec(time || '');
+    if (!m) return null;
+    const h = Number(m[1]);
+    return h >= 6 && h < 14 ? 'DAY' : h >= 14 && h < 22 ? 'SW' : 'GY';
+}
+
+function setStatus(code, save = true) {
+    state.status = code;
+    $$('#statusSeg [data-status]').forEach((b) => b.classList.toggle('active', b.dataset.status === code));
+    if (save) saveDraft();
+}
+
+function setShift(code, { manual = false, save = true } = {}) {
+    state.shift = code || null;
+    if (manual) state.shiftManual = !!code;
+    $$('#shiftSeg [data-shift]').forEach((b) => b.classList.toggle('active', b.dataset.shift === state.shift));
+    if (save) saveDraft();
+}
+
+// 시작시간이 바뀌면 (근무를 직접 고르지 않은 경우) 근무 자동 판정
+function autoShift() {
+    if (!state.shiftManual) setShift(shiftOf($('#entryStart').value) || state.shift, { save: false });
+}
+
+// 텍스트칸 높이를 내용에 맞춰 자동 확장
+function autoGrow(el) {
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight + 2}px`;
+}
+const growAll = () => Object.values(SECTION_FIELDS).forEach((sel) => autoGrow($(sel)));
+
+// 빠른 문구: 커서 위치(또는 끝)에 삽입
+function insertQuick(btn) {
+    const ta = $(`#${btn.closest('.sec-quick').dataset.for}`);
+    const v = ta.value;
+    const start = document.activeElement === ta ? ta.selectionStart : v.length;
+    const before = v.slice(0, start).replace(/\s+$/, '');
+    const text = (before ? `${before}${/[\n]$/.test(v.slice(0, start)) ? '' : ', '}` : '') + btn.dataset.quick;
+    ta.value = text + v.slice(start);
+    ta.focus();
+    ta.setSelectionRange(text.length, text.length);
+    if (btn.dataset.quickStatus) setStatus(btn.dataset.quickStatus, false);
+    autoGrow(ta);
+    saveDraft();
+}
+
 function setCategory(code, save = true) {
     state.category = code;
     $$('#categoryGrid .work-type-btn').forEach((b) => b.classList.toggle('active', b.dataset.category === code));
@@ -161,8 +216,13 @@ function formPayload() {
         end_time: $('#entryEnd').value || null,
         equipment: [...state.selectedEquip],
         category: state.category,
-        content: $('#entryContent').value,
-        summary: $('#entrySummary').value,
+        status: state.status,
+        shift: state.shift,
+        title: $('#entryTitle').value,
+        link: $('#entryLink').value,
+        symptom: $('#entrySymptom').value,
+        action: $('#entryAction').value,
+        result: $('#entryResult').value,
         author: $('#globalAuthor').value,
         attachment_ids: state.attachments.filter((a) => a.id).map((a) => a.id),
     };
@@ -172,7 +232,7 @@ function saveDraft() {
     if (state.editingId) return;
     const p = formPayload();
     const attachments = state.attachments.filter((a) => a.id).map(({ id, url, name }) => ({ id, url, name }));
-    storage(DRAFT_KEY, JSON.stringify({ ...p, author: undefined, attachment_ids: undefined, attachments }));
+    storage(DRAFT_KEY, JSON.stringify({ ...p, author: undefined, attachment_ids: undefined, attachments, shiftManual: state.shiftManual }));
 }
 
 function restoreDraft() {
@@ -182,10 +242,15 @@ function restoreDraft() {
     if (!d) return;
     $('#entryStart').value = d.start_time || '';
     $('#entryEnd').value = d.end_time || '';
-    $('#entryContent').value = d.content || '';
-    $('#entrySummary').value = d.summary || '';
+    $('#entryTitle').value = d.title || '';
+    $('#entryLink').value = d.link || '';
+    Object.entries(SECTION_FIELDS).forEach(([k, sel]) => { $(sel).value = d[k] || ''; });
     state.selectedEquip = new Set(d.equipment || []);
     if (d.category) setCategory(d.category, false);
+    if (d.status) setStatus(d.status, false);
+    state.shiftManual = !!d.shiftManual;
+    setShift(d.shift, { save: false });
+    growAll();
     state.attachments = (d.attachments || []).map((a) => ({ ...a, key: `a${a.id}`, status: 'done' }));
     renderAttachments();
     updateDuration();
@@ -204,11 +269,16 @@ function clearForm(keepDate = true) {
     $('#entryForm').reset();
     $('#entryDate').value = keepDate && date ? date : today();
     state.selectedEquip = new Set();
-    setCategory(defaultCategory(), false);  // 수정 취소 시 임시보관을 덮어쓰지 않도록 저장하지 않음
+    // 수정 취소 시 임시보관을 덮어쓰지 않도록 저장하지 않음
+    setCategory(defaultCategory(), false);
+    setStatus(state.meta.default_status || 'closed', false);
+    state.shiftManual = false;
+    setShift(null, { save: false });
     state.attachments = [];
     renderAttachments();
     renderEquipChips();
     updateDuration();
+    growAll();
 }
 
 // 저장 완료 / 초기화: 폼과 임시보관 모두 비움
@@ -232,7 +302,9 @@ function cancelEdit() {
 async function submitEntry(e, keepOpen = false) {
     e && e.preventDefault();
     const p = formPayload();
-    if (!p.content.trim()) { $('#entryContent').focus(); toast('작업내용을 입력하세요', 'danger'); return; }
+    if (!p.title.trim() && !p.symptom.trim() && !p.action.trim() && !p.result.trim()) {
+        $('#entrySymptom').focus(); toast('작업명 또는 작업내용(현상/조치사항/결론)을 입력하세요', 'danger'); return;
+    }
     if (!p.equipment.length) p.equipment = [COMMON];
     setIndicator('saving', '저장 중…');
     try {
@@ -249,7 +321,7 @@ async function submitEntry(e, keepOpen = false) {
         if (!wasEditing && p.end_time) $('#entryStart').value = p.end_time;
         setIndicator('', `저장됨 ${new Date().toTimeString().slice(0, 5)}`);
         if (state.entryInModal && !keepOpen) entryModalObj.hide();
-        else $('#entryContent').focus();
+        else $('#entrySymptom').focus();
         refreshCurrent();
     } catch (err) {
         setIndicator('error', '저장 실패');
@@ -262,17 +334,23 @@ function startEdit(log) {
     $('#entryDate').value = log.work_date;
     $('#entryStart').value = log.start_time || '';
     $('#entryEnd').value = log.end_time || '';
-    $('#entryContent').value = log.content;
-    $('#entrySummary').value = log.summary_auto ? '' : log.summary || '';
+    $('#entryTitle').value = log.title_auto ? '' : log.title || '';
+    $('#entryTitle').placeholder = log.title_auto ? `자동: ${log.title}` : '작업명 (비우면 현상 첫 줄로 자동)';
+    $('#entryLink').value = log.link || '';
+    Object.entries(SECTION_FIELDS).forEach(([k, sel]) => { $(sel).value = log[k] || ''; });
     state.selectedEquip = new Set(log.equipment_list);
     setCategory(log.category);
+    setStatus(log.status);
+    state.shiftManual = true;
+    setShift(log.shift, { save: false });
     state.attachments = log.attachments.map((a) => ({ ...a, key: `a${a.id}`, status: 'done' }));
     renderAttachments();
     renderEquipChips();
     updateDuration();
     setEditUi(true);
     renderDay();
-    $('#entryContent').focus();
+    growAll();
+    $('#entrySymptom').focus();
 }
 
 // ─── Entry popup (Work History 등에서 작업 입력) ──────
@@ -301,7 +379,7 @@ function onEntryModalHidden() {
 function newLog() {
     if (currentView() === 'daily') {
         if (state.editingId) cancelEdit();
-        $('#entryContent').focus();
+        $('#entrySymptom').focus();
     } else {
         openEntryModal();
     }
@@ -316,6 +394,34 @@ async function loadDay(markFresh = false) {
     renderDay();
 }
 
+const statusPill = (l) => `<button type="button" class="status-pill ${l.status}" data-toggle-status="${l.id}" title="클릭해서 ${l.status === 'closed' ? 'On-going' : 'Closed'} 로 변경">
+    <i class="bi ${l.status === 'closed' ? 'bi-check-circle-fill' : 'bi-hourglass-split'}"></i>${STATUS_LABEL[l.status] || l.status}</button>`;
+const shiftBadge = (code) => (code ? `<span class="shift-badge shift-${code}">${code}</span>` : '');
+
+function linkHtml(text) {
+    return (text || '').split(/\s+/).filter(Boolean).map((t) => /^https?:\/\//.test(t)
+        ? `<a href="${esc(t)}" target="_blank" rel="noopener" class="link-chip"><i class="bi bi-box-arrow-up-right"></i>${esc(t.replace(/^https?:\/\/(www\.)?/, '').slice(0, 28))}</a>`
+        : `<span class="link-chip"><i class="bi bi-link-45deg"></i>${esc(t)}</span>`).join('');
+}
+
+// 작업내용 3단 표시 (Confluence 표의 작업내용 칸)
+function sectionsHtml(l, q) {
+    const rows = Object.keys(SECTION_FIELDS).filter((k) => (l[k] || '').trim())
+        .map((k) => `<div class="sv sv-${k}"><span class="sv-label">${Object.keys(SECTION_FIELDS).indexOf(k) + 1}. ${SECTION_LABEL[k]}</span><div class="sv-text">${highlight(l[k], q)}</div></div>`);
+    return rows.length ? `<div class="sections-view">${rows.join('')}</div>` : `<div class="sv-text">${highlight(l.content, q)}</div>`;
+}
+
+async function toggleStatus(id) {
+    const l = [...state.historyLogs, ...state.dayLogs].find((x) => x.id === id);
+    if (!l) return;
+    const next = l.status === 'closed' ? 'ongoing' : 'closed';
+    try {
+        await api(`/api/logs/${id}`, { method: 'PUT', body: JSON.stringify({ status: next }) });
+        toast(`${STATUS_LABEL[next]} 로 변경했습니다`);
+        refreshCurrent();
+    } catch (err) { toast(err.message, 'danger'); }
+}
+
 function thumbsHtml(list) {
     if (!list || !list.length) return '';
     return `<div class="thumbs-sm">${list.map((a) => `<div class="thumb" data-lightbox="${esc(a.url)}" data-name="${esc(a.name || '')}"><img src="${esc(a.url)}" alt="" loading="lazy"></div>`).join('')}</div>`;
@@ -323,7 +429,9 @@ function thumbsHtml(list) {
 
 function renderDay() {
     const d = $('#entryDate').value || today();
-    const logs = [...state.dayLogs].sort((a, b) => (a.start_time || '99').localeCompare(b.start_time || '99'));
+    const SHIFT_ORDER = { DAY: 0, SW: 1, GY: 2 };
+    const logs = [...state.dayLogs].sort((a, b) => (SHIFT_ORDER[a.shift] ?? 3) - (SHIFT_ORDER[b.shift] ?? 3)
+        || (a.start_time || '99').localeCompare(b.start_time || '99'));
     $('#entryWeekday').textContent = weekday(d);
     $('#dayTitle').textContent = d === today() ? `오늘 (${d.slice(5)} ${weekday(d)})` : `${d} (${weekday(d)})`;
     $('#dayCount').textContent = logs.length;
@@ -333,14 +441,12 @@ function renderDay() {
         $('#dayTimeline').innerHTML = '<div class="empty-state"><i class="bi bi-journal-plus"></i>아직 입력된 작업이 없습니다.<br><small>왼쪽에서 오늘 한 작업을 간단히 적어보세요.</small></div>';
         return;
     }
-    $('#dayTimeline').innerHTML = logs.map((l) => {
-        const body = l.summary_auto ? l.content.split('\n').slice(1).join('\n').trim() : l.content;
-        return `<div class="timeline-item ${state.editingId === l.id ? 'editing' : ''} ${state.freshIds && state.freshIds.has(l.id) ? 'fresh' : ''}">
-            <div class="timeline-time">${l.start_time ? `${l.start_time}~${l.end_time || ''}` : '<span class="text-muted">시간 미입력</span>'}<small>${fmtDur(l.duration_min)}</small></div>
+    $('#dayTimeline').innerHTML = logs.map((l) => `<div class="timeline-item ${state.editingId === l.id ? 'editing' : ''} ${state.freshIds && state.freshIds.has(l.id) ? 'fresh' : ''}">
+            <div class="timeline-time">${statusPill(l)}<div class="mt-1">${shiftBadge(l.shift)} ${l.start_time ? `${l.start_time}~${l.end_time || ''}` : ''}</div><small>${fmtDur(l.duration_min)}</small></div>
             <div>
-                <div class="mb-1">${eqBadges(l.equipment_list)} ${catBadge(l.category)}</div>
-                <div class="timeline-summary">${esc(l.summary)}${l.summary_auto ? '<span class="auto-tag">자동</span>' : ''}</div>
-                ${body ? `<div class="timeline-content">${esc(body)}</div>` : ''}
+                <div class="mb-1">${eqBadges(l.equipment_list)} ${catBadge(l.category)} ${linkHtml(l.link)}</div>
+                <div class="timeline-summary">${esc(l.title)}${l.title_auto ? '<span class="auto-tag">자동</span>' : ''}</div>
+                ${sectionsHtml(l)}
                 ${thumbsHtml(l.attachments)}
             </div>
             <div class="timeline-actions">
@@ -348,8 +454,7 @@ function renderDay() {
                 <button class="btn btn-sm btn-light" data-copy="${l.id}" title="복제해서 새로 입력"><i class="bi bi-copy"></i></button>
                 <button class="btn btn-sm btn-light text-danger" data-delete="${l.id}" title="삭제"><i class="bi bi-trash"></i></button>
             </div>
-        </div>`;
-    }).join('');
+        </div>`).join('');
 }
 
 async function deleteLog(id) {
@@ -386,26 +491,29 @@ async function loadHistory() {
     const rows = state.historyLogs.map((l) => {
         const first = l.work_date !== lastDate;
         lastDate = l.work_date;
-        return `<tr class="${first ? 'date-first' : ''}">
-            <td class="date-cell">${first ? `${l.work_date.slice(5).replace('-', '/')}<small>${l.work_date.slice(0, 4)} (${weekday(l.work_date)})</small>` : ''}</td>
-            <td class="font-mono">${l.start_time ? `${l.start_time}~${l.end_time || ''}` : '-'}<br><small class="text-muted">${fmtDur(l.duration_min)}</small></td>
+        return `<tr class="${first ? 'date-first' : ''} ${l.status === 'ongoing' ? 'row-ongoing' : ''}">
+            <td>${statusPill(l)}</td>
+            <td class="date-cell">${first ? `${l.work_date.slice(5).replace('-', '/')}<small>${l.work_date.slice(0, 4)} (${weekday(l.work_date)})</small>` : '<small class="text-muted">〃</small>'}
+                <div class="mt-1">${shiftBadge(l.shift)}</div>${l.start_time ? `<small class="font-mono text-muted">${l.start_time}~${l.end_time || ''}</small>` : ''}</td>
             <td>${eqBadges(l.equipment_list)}</td>
-            <td>${catBadge(l.category)}</td>
-            <td class="content-cell">${highlight(l.content, q)}${thumbsHtml(l.attachments)}</td>
-            <td>${highlight(l.summary, q)}${l.summary_auto ? '<span class="auto-tag">자동</span>' : ''}</td>
-            <td class="small">${esc(l.author || '')}</td>
-            <td class="row-actions"><button class="btn btn-sm btn-light" data-edit="${l.id}"><i class="bi bi-pencil"></i></button></td>
+            <td><div class="title-cell">${highlight(l.title, q)}${l.title_auto ? '<span class="auto-tag">자동</span>' : ''}</div>
+                <div class="mt-1">${catBadge(l.category)}</div><small class="text-muted">${esc(l.author || '')}</small></td>
+            <td class="link-cell">${linkHtml(l.link)}</td>
+            <td class="content-cell">${sectionsHtml(l, q)}${thumbsHtml(l.attachments)}</td>
+            <td class="row-actions"><button class="btn btn-sm btn-light" data-edit="${l.id}" title="수정"><i class="bi bi-pencil"></i></button></td>
         </tr>`;
     }).join('');
-    $('#historyBody').innerHTML = rows || '<tr><td colspan="8"><div class="empty-state"><i class="bi bi-inbox"></i>조건에 맞는 기록이 없습니다.</div></td></tr>';
+    $('#historyBody').innerHTML = rows || '<tr><td colspan="7"><div class="empty-state"><i class="bi bi-inbox"></i>조건에 맞는 기록이 없습니다.</div></td></tr>';
     const mins = state.historyLogs.reduce((s, l) => s + (l.duration_min || 0), 0);
-    $('#historyCount').textContent = `${state.historyLogs.length}건 · 총 ${fmtHours(mins)}`;
+    const ongoing = state.historyLogs.filter((l) => l.status === 'ongoing').length;
+    $('#historyCount').innerHTML = `${state.historyLogs.length}건 · On-going <b class="text-warning">${ongoing}</b> · 총 ${fmtHours(mins)}`;
 }
 
 function setRange(r) {
     const f = $('#filterForm');
     const now = new Date();
-    if (r === 'all') { f.date_from.value = ''; f.date_to.value = ''; }
+    if (r === 'ongoing') { f.status.value = f.status.value === 'ongoing' ? '' : 'ongoing'; }
+    else if (r === 'all') { f.date_from.value = ''; f.date_to.value = ''; }
     else if (r === 'week') {
         const mon = new Date(now); mon.setDate(now.getDate() - ((now.getDay() + 6) % 7));
         f.date_from.value = isoDate(mon); f.date_to.value = today();
@@ -487,23 +595,30 @@ function clipboardImages(dt) {
 }
 
 // ─── AI 정리 ──────────────────────────────────────────
-const AI_FLASH = ['#entryContent', '#entrySummary', '#entryStart', '#entryEnd', '#equipChips', '#categoryGrid'];
+const AI_FLASH = ['#entryTitle', '#entrySymptom', '#entryAction', '#entryResult', '#entryLink', '#statusSeg', '#shiftSeg', '#equipChips', '#categoryGrid'];
 
 function formValues() {
-    return { content: $('#entryContent').value, summary: $('#entrySummary').value, category: state.category,
+    return { title: $('#entryTitle').value, link: $('#entryLink').value,
+        ...Object.fromEntries(Object.entries(SECTION_FIELDS).map(([k, sel]) => [k, $(sel).value])),
+        status: state.status, shift: state.shift, shiftManual: state.shiftManual, category: state.category,
         equipment: [...state.selectedEquip], start_time: $('#entryStart').value, end_time: $('#entryEnd').value,
         work_date: $('#entryDate').value };
 }
 
 function setFormValues(v) {
-    $('#entryContent').value = v.content; $('#entrySummary').value = v.summary;
+    $('#entryTitle').value = v.title || ''; $('#entryLink').value = v.link || '';
+    Object.entries(SECTION_FIELDS).forEach(([k, sel]) => { $(sel).value = v[k] || ''; });
     $('#entryStart').value = v.start_time || ''; $('#entryEnd').value = v.end_time || '';
-    state.selectedEquip = new Set(v.equipment); setCategory(v.category); renderEquipChips(); updateDuration(); saveDraft();
+    state.selectedEquip = new Set(v.equipment); setCategory(v.category, false); setStatus(v.status, false);
+    state.shiftManual = !!v.shiftManual; setShift(v.shift, { save: false });
+    renderEquipChips(); updateDuration(); growAll(); saveDraft();
 }
 
 async function runAi() {
     const cur = formValues();
-    if (!cur.content.trim()) { toast('정리할 메모를 작업내용에 먼저 적어주세요', 'danger'); return; }
+    if (!['title', 'symptom', 'action', 'result'].some((k) => cur[k].trim())) {
+        toast('정리할 메모를 1. 현상 칸에 먼저 적어주세요', 'danger'); $('#entrySymptom').focus(); return;
+    }
     const btn = $('[data-ai]');
     const label = btn.innerHTML;
     btn.disabled = true;
@@ -516,10 +631,15 @@ async function runAi() {
         let equipment = cur.equipment.filter((e) => e !== COMMON);
         equipment = [...new Set([...equipment, ...found])];
         if (!equipment.length) equipment = cur.equipment.length || r.equipment.includes(COMMON) ? [COMMON] : [];
+        // 작업내용 3칸·작업명은 AI 결과로, 완료여부는 AI 판단이 있을 때, 근무·링크·시간은 비어 있을 때만 채움
         setFormValues({
             ...cur,
-            content: r.content,
-            summary: r.summary,
+            title: cur.title.trim() || r.title,
+            symptom: r.symptom, action: r.action, result: r.result,
+            status: r.status || cur.status,
+            shift: cur.shift || r.shift,
+            shiftManual: cur.shiftManual,
+            link: cur.link.trim() || r.link,
             category: r.category !== defaultCategory() ? r.category : cur.category,
             equipment,
             start_time: cur.start_time || r.start_time || '',
@@ -531,7 +651,8 @@ async function runAi() {
         box.innerHTML = `<div class="ai-head"><i class="bi bi-stars"></i> AI 정리 완료
                 <span class="text-muted fw-normal">· ${r.engine === 'llm' ? 'LLM' : '규칙 기반'}${r.warning ? ` (${esc(r.warning)})` : ''}</span>
                 <button type="button" class="btn btn-sm btn-link ms-auto p-0" data-ai-undo><i class="bi bi-arrow-counterclockwise"></i> 되돌리기</button></div>
-            ${list('이슈', r.issues)}${list('후속 조치', r.next_actions)}
+            <div class="mt-1">완료여부 <b>${STATUS_LABEL[r.status || cur.status]}</b>${r.shift ? ` · 근무 <b>${r.shift}</b>` : ''}${r.link ? ` · 링크 <b>${esc(r.link)}</b>` : ''}</div>
+            ${list('남은 후속 조치', r.next_actions || [])}
             <div class="text-muted mt-1">내용을 확인한 뒤 저장하세요.</div>`;
         box.hidden = false;
     } catch (err) {
@@ -582,7 +703,7 @@ async function loadStats() {
     $('#kTotal').textContent = s.total_count;
     $('#kTotalHours').textContent = fmtHours(s.total_minutes);
     $('#kWeek').textContent = `${s.week_count} / ${fmtHours(s.week_minutes)}`;
-    $('#kMissing').textContent = s.missing_time_count;
+    $('#kOngoing').textContent = s.ongoing_count;
 
     const css = getComputedStyle(document.documentElement);
     const primary = css.getPropertyValue('--primary').trim();
@@ -634,19 +755,66 @@ async function loadStats() {
 }
 
 // ─── Import / Export ──────────────────────────────────
+// Confluence 표를 HTML 로 복사하면 셀 안 줄바꿈·병합(rowspan)까지 2차원 배열로 복원
+function cellText(td) {
+    const clone = td.cloneNode(true);
+    clone.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
+    clone.querySelectorAll('p, li, div, h1, h2, h3, h4, tr').forEach((el) => el.append('\n'));
+    clone.querySelectorAll('li').forEach((li) => li.prepend('- '));
+    return clone.textContent.replace(/\u00a0/g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function htmlTableRows(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const table = doc.querySelector('table');
+    if (!table) return null;
+    const grid = [];
+    [...table.rows].forEach((tr, r) => {
+        grid[r] = grid[r] || [];
+        let c = 0;
+        [...tr.cells].forEach((td) => {
+            while (grid[r][c] !== undefined) c += 1;
+            const text = cellText(td);
+            for (let dr = 0; dr < (td.rowSpan || 1); dr++) {
+                for (let dc = 0; dc < (td.colSpan || 1); dc++) {
+                    grid[r + dr] = grid[r + dr] || [];
+                    grid[r + dr][c + dc] = dr === 0 && dc === 0 ? text : (dc === 0 ? text : '');
+                }
+            }
+            c += td.colSpan || 1;
+        });
+    });
+    return grid.map((row) => [...row].map((v) => v ?? ''));
+}
+
+function onImportPaste(e) {
+    const html = e.clipboardData.getData('text/html');
+    const rows = html && htmlTableRows(html);
+    if (!rows || !rows.length) { state.importRows = null; return; }
+    e.preventDefault();
+    state.importRows = rows;
+    $('#importText').value = rows.map((r) => r.map((c) => c.replace(/\n/g, ' ⏎ ')).join('\t')).join('\n');
+    $('#importInfo').innerHTML = `<i class="bi bi-table"></i> Confluence 표 <b>${rows.length}</b>행 인식 (셀 줄바꿈·병합 유지) → 미리보기를 눌러 확인하세요`;
+    runImport(true);
+}
+
 async function runImport(dryRun) {
     const text = $('#importText').value;
-    if (!text.trim()) { toast('붙여넣을 표 내용이 없습니다', 'danger'); return; }
+    if (!text.trim() && !state.importRows) { toast('붙여넣을 표 내용이 없습니다', 'danger'); return; }
+    const body = { dry_run: dryRun, year: $('#importYear').value, category: $('#importCategory').value, author: $('#globalAuthor').value };
+    if (state.importRows) body.rows = state.importRows; else body.text = text;
     try {
-        const r = await api('/api/import', {
-            method: 'POST',
-            body: JSON.stringify({ text, dry_run: dryRun, year: $('#importYear').value, category: $('#importCategory').value, author: $('#globalAuthor').value }),
-        });
+        const r = await api('/api/import', { method: 'POST', body: JSON.stringify(body) });
         const errs = r.errors.length ? `<div class="alert alert-warning py-2 small mb-2">${r.errors.map(esc).join('<br>')}</div>` : '';
-        const rows = r.preview.map((p) => `<tr><td>${p.work_date}</td><td class="font-mono">${p.start_time ? `${p.start_time}~${p.end_time}` : '-'}</td><td>${eqBadges(p.equipment.split(', '))}</td><td class="small">${esc(p.content)}</td><td class="small">${esc(p.summary)}</td></tr>`).join('');
+        const rows = r.preview.map((p) => `<tr>
+            <td>${statusPill({ ...p, id: '' })}</td><td>${p.work_date.slice(5)} ${shiftBadge(p.shift)}</td><td>${eqBadges(p.equipment.split(', '))}</td>
+            <td>${esc(p.title)}</td><td>${linkHtml(p.link)}</td><td class="content-cell">${sectionsHtml(p)}</td></tr>`).join('');
         $('#importResult').innerHTML = `${errs}<div class="small mb-2">${dryRun ? `미리보기: <b>${r.parsed}</b>건 인식` : `<b class="text-success">${r.imported}건 저장 완료</b>`}</div>
-            ${rows ? `<div class="table-responsive"><table class="table table-sm small mb-0"><thead><tr><th>날짜</th><th>시간</th><th>호기</th><th>내용</th><th>요약</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}`;
-        if (!dryRun && r.imported) { toast(`${r.imported}건 가져왔습니다`); $('#importText').value = ''; }
+            ${rows ? `<div class="table-responsive"><table class="table table-sm small mb-0 history-table import-preview"><thead><tr><th>완료</th><th>날짜/근무</th><th>호기</th><th>작업명</th><th>링크</th><th>작업내용</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}`;
+        if (!dryRun && r.imported) {
+            toast(`${r.imported}건 가져왔습니다`);
+            $('#importText').value = ''; state.importRows = null; $('#importInfo').textContent = '';
+        }
     } catch (err) { toast(err.message, 'danger'); }
 }
 
@@ -739,6 +907,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             else if ('ai' in xs) runAi();
             return;
         }
+        const fx = e.target.closest('[data-status],[data-shift],[data-quick],[data-toggle-status],[data-goto-ongoing]');
+        if (fx) {
+            const fs = fx.dataset;
+            if ('toggleStatus' in fs) { if (fs.toggleStatus) toggleStatus(+fs.toggleStatus); }
+            else if ('gotoOngoing' in fs) { const f = $('#filterForm'); f.reset(); f.status.value = 'ongoing'; switchView('history'); }
+            else if (fs.quick) insertQuick(fx);
+            else if (fs.status) setStatus(fs.status);
+            else if (fs.shift) setShift(state.shift === fs.shift ? null : fs.shift, { manual: true });
+            return;
+        }
         const t = e.target.closest('[data-view],[data-equip],[data-category],[data-dur],[data-time-preset],[data-date-shift],[data-edit],[data-edit-inline],[data-copy],[data-delete],[data-range],[data-goto-equip],[data-export]');
         if (!t) return;
         const ds = t.dataset;
@@ -749,11 +927,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             const start = $('#entryStart').value || addMinutes(new Date().toTimeString().slice(0, 5), -Number(ds.dur));
             $('#entryStart').value = start;
             $('#entryEnd').value = addMinutes(start, Number(ds.dur));
-            updateDuration(); saveDraft();
+            autoShift(); updateDuration(); saveDraft();
         } else if (ds.timePreset === 'now') {
             const now = new Date().toTimeString().slice(0, 5);
             if (!$('#entryStart').value) $('#entryStart').value = now; else $('#entryEnd').value = now;
-            updateDuration(); saveDraft();
+            autoShift(); updateDuration(); saveDraft();
         } else if (ds.timePreset === 'day') {
             $('#entryStart').value = '08:00'; $('#entryEnd').value = '17:00'; updateDuration(); saveDraft();
         } else if (ds.dateShift) {
@@ -767,7 +945,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             const l = state.dayLogs.find((x) => x.id === +ds.copy);
             resetForm();
             state.selectedEquip = new Set(l.equipment_list); setCategory(l.category); renderEquipChips();
-            $('#entryContent').value = l.content; $('#entryContent').focus(); saveDraft();
+            $('#entryTitle').value = l.title_auto ? '' : l.title;
+            Object.entries(SECTION_FIELDS).forEach(([k, sel]) => { $(sel).value = l[k] || ''; });
+            growAll(); $('#entrySymptom').focus(); saveDraft();
         } else if (ds.delete) deleteLog(+ds.delete);
         else if (ds.range) setRange(ds.range);
         else if (ds.gotoEquip) {
@@ -777,7 +957,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     $('#entryForm').addEventListener('submit', submitEntry);
     $('#entryForm').addEventListener('input', saveDraft);
-    ['#entryStart', '#entryEnd'].forEach((s) => $(s).addEventListener('change', updateDuration));
+    ['#entryStart', '#entryEnd'].forEach((s) => $(s).addEventListener('change', () => { autoShift(); updateDuration(); saveDraft(); }));
+    Object.values(SECTION_FIELDS).forEach((sel) => $(sel).addEventListener('input', (e) => autoGrow(e.target)));
+    $('#importText').addEventListener('paste', onImportPaste);
+    $('#importText').addEventListener('input', () => { state.importRows = null; $('#importInfo').textContent = ''; });
     $('#entryDate').addEventListener('change', () => { updateDuration(); loadDay(); });
     // 하이라이트 애니메이션은 1회만 (폼이 팝업↔Daily Log 로 이동할 때 재생되지 않도록)
     document.addEventListener('animationend', (e) => e.target.classList.remove('ai-filled', 'fresh'));
@@ -786,7 +969,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('#entrySubmitNext').addEventListener('click', (e) => submitEntry(e, true));
     $('#entryDelete').addEventListener('click', () => deleteLog(state.editingId));
     $('#entryModal').addEventListener('hidden.bs.modal', onEntryModalHidden);
-    $('#entryModal').addEventListener('shown.bs.modal', () => $('#entryContent').focus());
+    $('#entryModal').addEventListener('shown.bs.modal', () => { growAll(); ($('#entryTitle').value ? $('#entrySymptom') : $('#entryTitle')).focus(); });
     $('#copyDayConfluence').addEventListener('click', () => { const d = $('#entryDate').value; copyConfluence(`date_from=${d}&date_to=${d}`); });
     $('#copyConfluence').addEventListener('click', () => copyConfluence(historyParams()));
     $('#filterForm').addEventListener('submit', (e) => { e.preventDefault(); loadHistory(); });
@@ -849,6 +1032,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (err) {
         setIndicator('error', 'DB 연결 실패');
     }
+    setStatus(state.meta.default_status || 'closed', false);
     restoreDraft();
     renderEquipChips();
     switchView(location.hash.slice(1) || DEFAULT_VIEW);

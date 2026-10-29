@@ -22,29 +22,34 @@ Confluence 페이지 표(날짜 / 작업시간 / 설비호기·공통 / 작업�
 
 메뉴: **Work History**(기본 화면) · **Daily Log** · **Setup Dashboard** · **Import / Export** · **AI Assistant**
 
-- **작업 입력 팝업**: Work History 의 `작업 입력` 버튼, 우하단 `+` 버튼, 또는 `N` 키 → 팝업에서 입력. 이력의 ✏️ 수정도 같은 팝업
-  - 왼쪽에 날짜·시간·호기·분류·요약, 오른쪽에 넓은 작업내용 칸(팝업 440px+, 크기 조절 가능)
-  - `저장`(닫기) / `저장 후 계속`(연속 입력), 수정 시 `삭제`. Daily Log 화면과 같은 폼이라 임시보관·단축키 동일
-- **테마**: 상단 `Theme` → Accent 9색 + 직접 선택(#RRGGBB), Sidebar(Navy/Black/Accent/Light), Light/Dark, 기본값 복원.
-  브라우저에 저장되며, 모든 색은 CSS 변수(`--primary*`, `--sidebar-*`)로 연결 → 새 프리셋은 `static/js/theme.js` 의 `ACCENTS` 에 한 줄 추가
-- **입력 항목**: 날짜(◀ ▶ / 오늘), 작업시간(지금·+30분·+1h·+2h·+4h·주간 프리셋, 소요시간 자동 계산·야간 자정 넘김 지원),
-  설비호기 칩 다중 선택 또는 `공통`, 분류(설비 Down · 셋업 · PM · 공통업무 · 공정개선 · 순간정지 · 간단작업, 기본값 간단작업 — 목록은 `app.py` 의 `CATEGORIES`, 이전 분류 데이터는 시작 시 자동 변환), 작업내용, 요약
-  - `Ctrl+Enter` 저장, 저장 후 다음 작업 시작시간 = 직전 종료시간
-  - 요약을 비우면 작업내용 첫 줄로 자동 요약 (`자동` 태그) → 추후 LLM 요약으로 교체 예정
-  - 입력 중 내용은 브라우저에 임시 보관 (새로고침해도 유지)
-- **캡처 붙여넣기**: 작업내용 칸에서 `Ctrl+V` (또는 드래그&드롭) → 즉시 서버 업로드, 썸네일 바로 표시
-  - 새 작업 입력 중: 서버에 먼저 저장되고, 작업 저장 시 그 기록에 연결
-  - 기존 기록 수정 중(폼/수정 모달): 해당 기록에 바로 저장 → 목록에 즉시 반영
-  - 썸네일 클릭 시 크게 보기, `×` 로 삭제. 파일은 `uploads/YYYYMM/` 에 저장
-  - 엑셀처럼 텍스트+이미지가 함께 복사된 경우는 텍스트 붙여넣기 우선
-- **AI 정리** (`✨ AI 정리` 버튼 또는 `Alt+A`): 대충 적은 메모 → 개조식 작업내용(후속 조치는 `▶ 후속:`), 40자 요약,
-  분류, 설비호기, 작업시간을 자동 기입. 이슈/후속 조치 목록 표시, `되돌리기` 지원. 저장 전 확인용
-- **실시간 반영**: 5초마다 변경 여부를 확인해 다른 사람이 입력/수정한 기록을 자동으로 보여줌 (새 항목 하이라이트)
-- **작업 이력**: 날짜별 묶음 표, 기간/호기/분류/검색어 필터, 검색어 하이라이트, 수정·삭제
-- **셋업 현황**: 누적/이번 주 건수·시간, 최근 14일 추이, 분류별 비중, 호기별 작업량 (클릭 시 이력 필터)
-- **가져오기**: Confluence 표를 복사(탭 구분)해서 붙여넣으면 미리보기 후 일괄 등록 (병합된 날짜 셀은 윗 행 날짜 상속)
-- **내보내기**: CSV(Excel, BOM 포함) / JSONL(AI·RAG용) / Confluence wiki markup 표 복사
-- 다크 모드, 사이드바 접기, `Ctrl+K` 검색
+### Confluence 작업이력 표와 같은 구성
+
+| 완료여부 | 날짜 / 근무 | 호기명 | 작업명 | EDM / CTTTM LINK | 작업내용 |
+|---|---|---|---|---|---|
+| On-going / Closed | 날짜 + DAY(06~14) · SW(14~22) · GY(22~06) | 복수 선택 또는 `공통` | 비우면 자동 | 번호·URL 여러 개 | **1. 현상 / 2. 조치사항 / 3. 결론** |
+
+- 분류(설비 Down · 셋업 · PM · 공통업무 · 공정개선 · 순간정지 · 간단작업)와 작업시간(선택, 입력하면 근무 자동 판정)도 함께 기록
+- **작업내용 3칸이 미리 구성**되어 있고, 칸마다 빠른 문구 버튼(예: 결론의 `정상 복구` → Closed, `Vendor 회신 대기` → On-going 자동)
+- 칸 높이는 내용에 맞춰 자동으로 늘어남
+- Work History 표는 작업내용 칸을 넓게 두고 현상/조치/결론을 나눠 표시. 완료여부 배지 클릭으로 On-going ↔ Closed 전환, On-going 은 좌측 주황 표시
+- 필터: 기간 · 완료여부 · 근무 · 호기 · 분류 · 검색어(작업명/내용/CTTTM), `On-going 만` 버튼
+
+### 입력
+- **작업 입력 팝업**: Work History 의 `작업 입력` 버튼, 우하단 `+`, 또는 `N` 키. 이력의 ✏️ 수정도 같은 팝업
+  - `저장`(닫기) / `저장 후 계속`(연속 입력), 수정 시 `삭제`. Daily Log 화면과 같은 폼이라 임시보관·단축키 동일 (`Ctrl+Enter` 저장)
+- **AI 정리** (`✨ AI 정리` 또는 `Alt+A`): 1. 현상 칸에 메모를 대충 몰아 적으면 작업명 · 현상/조치사항/결론 · 완료여부 · 근무 · 호기 · 분류 · EDM/CTTTM 을 자동 기입. `되돌리기` 지원
+- **캡처 붙여넣기**: 작업내용에서 `Ctrl+V` (또는 드래그&드롭) → 즉시 서버 업로드. 수정 중인 기록이면 그 기록에 바로 저장
+- **실시간 반영**: 5초마다 변경 확인, 다른 사람이 입력한 기록 자동 표시
+
+### 가져오기 / 내보내기
+- **Confluence 표 가져오기**: 표를 머리글까지 복사해 붙여넣으면 HTML 표로 읽어 셀 안 줄바꿈·병합 셀까지 복원. 머리글로 열 자동 판단, 작업내용의 1/2/3 자동 분리.
+  이전 형식(날짜 | 작업시간 | 설비호기 | 작업내용 | 요약)도 지원
+- **내보내기**: CSV(Excel) / JSONL(AI·RAG용, 현상·조치·결론 필드 포함) / Confluence wiki markup 표 — 모두 위와 같은 열 순서
+- **테마**: 상단 `Theme` → Accent 9색 + 직접 선택, Sidebar 4종, Light/Dark (`static/js/theme.js`)
+
+### 기존 데이터
+서버 시작 시 이전 버전 DB(내용 + 요약)를 자동 변환: 요약 → 작업명, 내용 → 1. 현상 (이미 `1. 현상 / 2. 조치사항 / 3. 결론` 형식이면 칸별로 분리),
+작업시간 → 근무, 완료여부는 Closed.
 
 ## 실행
 
@@ -76,15 +81,15 @@ export LLM_MODEL=grok-4-fast-non-reasoning  # 선택
 |---|---|---|
 | GET | `/api/meta` | 설비호기·분류·작성자 목록 |
 | POST | `/api/equipment` | 호기 추가 `{"name": "PAA7308"}` |
-| GET | `/api/logs` | 조회 (`date_from`, `date_to`, `equipment`, `category`, `author`, `q`, `limit`) |
+| GET | `/api/logs` | 조회 (`date_from`, `date_to`, `status`, `shift`, `equipment`, `category`, `author`, `q`, `limit`) |
 | POST | `/api/logs` | 등록 |
 | PUT / DELETE | `/api/logs/<id>` | 수정 / 삭제 |
 | GET | `/api/stats` | 현황 집계 |
 | POST | `/api/attachments` | 캡처 업로드 (multipart `file`, 선택 `log_id`) |
 | DELETE | `/api/attachments/<id>` | 캡처 삭제 |
-| POST | `/api/ai/organize` | AI 정리 (`content`, `equipment`, `category`, `work_date`) |
+| POST | `/api/ai/organize` | AI 정리 (`title`, `symptom`, `action`, `result`, `equipment`, `category`, `start_time`) |
 | GET | `/api/version` | 실시간 갱신용 변경 감지 |
-| POST | `/api/import` | Confluence 표 붙여넣기 가져오기 (`dry_run` 지원) |
+| POST | `/api/import` | Confluence 표 가져오기 (`rows` 2차원 배열 또는 탭 구분 `text`, `dry_run` 지원) |
 | GET | `/api/export.csv`, `/api/export.jsonl`, `/api/export/confluence` | 내보내기 (조회와 같은 필터) |
 
 ## AI 활용 계획
