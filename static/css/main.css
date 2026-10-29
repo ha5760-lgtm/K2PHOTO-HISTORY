@@ -582,3 +582,4 @@ mark { padding: 0 2px; background: rgba(255,209,102,0.5); border-radius: 2px; }
 .cat-pills .work-type-btn i { color: var(--cat); }
 .cat-pills .work-type-btn:hover { border-color: var(--cat); color: var(--cat); }
 .cat-pills .work-type-btn.active { border-color: var(--cat); color: var(--cat); background: color-mix(in srgb, var(--cat) 12%, transparent); }
+.topbar-title { white-space: nowrap; }

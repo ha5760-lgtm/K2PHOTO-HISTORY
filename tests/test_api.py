@@ -86,7 +86,7 @@ def test_categories_and_legacy_migration(client):
     import sqlite3
     import app as k2
     meta = client.get('/api/meta').get_json()
-    assert [c['label'] for c in meta['categories']] == ['설비 Down', '셋업', 'PM', '공통', '공정개선', '순간정지', '간단작업']
+    assert [c['label'] for c in meta['categories']] == ['설비 Down', '셋업', 'PM', '공통업무', '공정개선', '순간정지', '간단작업']
     assert meta['default_category'] == 'SIMPLE'
     log = client.post('/api/logs', json={'work_date': '2026-10-27', 'content': 'x'}).get_json()
     assert log['category'] == 'SIMPLE'

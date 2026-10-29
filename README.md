@@ -7,6 +7,9 @@ Confluence 페이지 표(날짜 / 작업시간 / 설비호기·공통 / 작업�
 
 ## 화면
 
+▶ **데모 영상 (약 2분)**: [`docs/demo/k2photo_demo.mp4`](docs/demo/k2photo_demo.mp4) — 팝업 입력 · 캡처 붙여넣기 · AI 정리 · 수정 · 검색 · 실시간 반영 · Daily Log · Dashboard · Confluence 가져오기 · 테마 변경
+(다시 녹화: 서버 실행 후 `node docs/demo/record_demo.js`, Playwright 필요)
+
 | Work History (Confluence 표 대체) | New Work Log 팝업 (캡처 + AI 정리) |
 |---|---|
 | ![history](docs/screenshots/history.png) | ![popup](docs/screenshots/1_entry_popup.png) |
@@ -25,7 +28,7 @@ Confluence 페이지 표(날짜 / 작업시간 / 설비호기·공통 / 작업�
 - **테마**: 상단 `Theme` → Accent 9색 + 직접 선택(#RRGGBB), Sidebar(Navy/Black/Accent/Light), Light/Dark, 기본값 복원.
   브라우저에 저장되며, 모든 색은 CSS 변수(`--primary*`, `--sidebar-*`)로 연결 → 새 프리셋은 `static/js/theme.js` 의 `ACCENTS` 에 한 줄 추가
 - **입력 항목**: 날짜(◀ ▶ / 오늘), 작업시간(지금·+30분·+1h·+2h·+4h·주간 프리셋, 소요시간 자동 계산·야간 자정 넘김 지원),
-  설비호기 칩 다중 선택 또는 `공통`, 분류(설비 Down · 셋업 · PM · 공통 · 공정개선 · 순간정지 · 간단작업, 기본값 간단작업 — 목록은 `app.py` 의 `CATEGORIES`, 이전 분류 데이터는 시작 시 자동 변환), 작업내용, 요약
+  설비호기 칩 다중 선택 또는 `공통`, 분류(설비 Down · 셋업 · PM · 공통업무 · 공정개선 · 순간정지 · 간단작업, 기본값 간단작업 — 목록은 `app.py` 의 `CATEGORIES`, 이전 분류 데이터는 시작 시 자동 변환), 작업내용, 요약
   - `Ctrl+Enter` 저장, 저장 후 다음 작업 시작시간 = 직전 종료시간
   - 요약을 비우면 작업내용 첫 줄로 자동 요약 (`자동` 태그) → 추후 LLM 요약으로 교체 예정
   - 입력 중 내용은 브라우저에 임시 보관 (새로고침해도 유지)

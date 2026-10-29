@@ -36,7 +36,7 @@ CATEGORIES = [
     ('DOWN', '설비 Down', 'bi-exclamation-octagon', '#ef476f'),
     ('SETUP', '셋업', 'bi-tools', '#4361ee'),
     ('PM', 'PM', 'bi-calendar-check', '#118ab2'),
-    ('COMMON', '공통', 'bi-people', '#64748b'),
+    ('COMMON', '공통업무', 'bi-people', '#64748b'),
     ('PROCESS', '공정개선', 'bi-graph-up-arrow', '#06a77d'),
     ('MINOR_STOP', '순간정지', 'bi-pause-circle', '#f59e0b'),
     ('SIMPLE', '간단작업', 'bi-check2-square', '#8b5cf6'),

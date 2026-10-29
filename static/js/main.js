@@ -790,7 +790,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('#copyDayConfluence').addEventListener('click', () => { const d = $('#entryDate').value; copyConfluence(`date_from=${d}&date_to=${d}`); });
     $('#copyConfluence').addEventListener('click', () => copyConfluence(historyParams()));
     $('#filterForm').addEventListener('submit', (e) => { e.preventDefault(); loadHistory(); });
-    $('#filterReset').addEventListener('click', () => { $('#filterForm').reset(); loadHistory(); });
+    $('#filterReset').addEventListener('click', () => { $('#filterForm').reset(); $('#globalSearch').value = ''; loadHistory(); });
     $('#importPreview').addEventListener('click', () => runImport(true));
     $('#importRun').addEventListener('click', () => runImport(false));
     $('#globalAuthor').addEventListener('change', (e) => storage('k2ph.author', e.target.value.trim()));
