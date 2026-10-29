@@ -8,7 +8,8 @@ Confluence 페이지 표(날짜 / 작업시간 / 설비호기·공통 / 작업�
 ## 화면
 
 ▶ **데모 영상 (약 2분)**: [`docs/demo/k2photo_demo.mp4`](docs/demo/k2photo_demo.mp4) — 팝업 입력 · 캡처 붙여넣기 · AI 정리 · 수정 · 검색 · 실시간 반영 · Daily Log · Dashboard · Confluence 가져오기 · 테마 변경
-(다시 녹화: 서버 실행 후 `node docs/demo/record_demo.js`, Playwright 필요)
+▶ **데모 PNG**: 단계별 화면 [`docs/demo/png/`](docs/demo/png) · 한 장 요약 [`docs/demo/k2photo_demo_overview.png`](docs/demo/k2photo_demo_overview.png)
+(영상·PNG 다시 만들기: 서버 실행 후 `node docs/demo/record_demo.js`, Playwright 필요)
 
 | Work History (Confluence 표 대체) | New Work Log 팝업 (캡처 + AI 정리) |
 |---|---|

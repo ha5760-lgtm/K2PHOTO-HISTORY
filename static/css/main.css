@@ -631,3 +631,17 @@ a.link-chip { color: var(--primary); }
 .kpi-card.clickable { cursor: pointer; }
 .import-preview { table-layout: auto; }
 #filterForm .col-md { min-width: 118px; }
+
+/* ============ 글자 크기 / 밀도: 작업내용이 길어도 한눈에 보이도록 전체 축소 ============ */
+html { font-size: 14px; }                       /* Bootstrap rem 기준 → 전체 약 12% 축소 */
+.history-table th { font-size: .78rem; padding: 8px 8px; }
+.history-table td { font-size: .8rem; padding: 7px 8px; }
+.history-table .title-cell { font-size: .82rem; }
+.sv { grid-template-columns: 64px 1fr; gap: 6px; }
+.sv-label { font-size: .68rem; }
+.sv-text { font-size: .8rem; line-height: 1.5; }
+.sections-view { gap: 2px; }
+.timeline-summary { font-size: .88rem; }
+.sections-editor .sec textarea { font-size: .85rem; line-height: 1.55; }
+.kpi-value { font-size: 1.5rem; }
+.kpi-card { padding: 14px 16px; }

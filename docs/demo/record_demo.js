@@ -5,6 +5,7 @@ const fs = require('fs');
 
 const BASE = 'http://localhost:5070';
 const OUT_DIR = path.join(__dirname, 'video');  // 녹화 결과(.webm) 위치
+const PNG_DIR = path.join(__dirname, 'png');     // 단계별 스크린샷 (자막 포함)
 const W = 1280, H = 800;
 
 const overlay = () => {
@@ -39,6 +40,8 @@ const overlay = () => {
 
 (async () => {
   fs.rmSync(OUT_DIR, { recursive: true, force: true });
+  fs.rmSync(PNG_DIR, { recursive: true, force: true });
+  fs.mkdirSync(PNG_DIR, { recursive: true });
   const browser = await chromium.launch();
 
   // 붙여넣기용 "캡처" 이미지 준비 (녹화 밖에서)
@@ -58,14 +61,19 @@ const overlay = () => {
   const wait = (ms) => p.waitForTimeout(ms);
   let step = 0;
   const caption = async (title, sub = '', ms = 1600) => {
-    step += 1;
+    step += 1; extra = 0;
     await p.evaluate(([t, s, n]) => {
       const c = document.getElementById('demo-caption');
       c.innerHTML = `<span class="step">${n}</span>${t}${s ? `<small>${s}</small>` : ''}`;
       c.style.opacity = 1;
     }, [title, sub, step]);
-    await wait(ms);
+    await wait(Math.min(ms, 700));
+    await p.screenshot({ path: path.join(PNG_DIR, `${String(step).padStart(2, '0')}.png`) });
+    await wait(Math.max(0, ms - 700));
   };
+  // 동작 후 상태를 추가로 남김 (예: 21b.png)
+  let extra = 0;
+  const snap = async () => { extra += 1; await p.screenshot({ path: path.join(PNG_DIR, `${String(step).padStart(2, '0')}${'bcdefg'[extra - 1]}.png`) }); };
   const hideCaption = () => p.evaluate(() => { document.getElementById('demo-caption').style.opacity = 0; });
   const moveTo = async (sel, opts = {}) => {
     const el = p.locator(sel).first();
@@ -165,6 +173,7 @@ const overlay = () => {
   await click('.sec-action [data-quick="세정"]', { after: 500 });
   await p.keyboard.type(' (DEV cup), filter 교체', { delay: 35 });
   await click('.sec-result [data-quick="정상 복구"]', { after: 700 });
+  await snap();
   await p.keyboard.press('Control+Enter');
   await wait(1200);
   await caption('Ctrl+Enter 저장 → 오늘 작업 내역에 추가', '결론에 "정상 복구" 를 고르면 완료여부가 자동으로 Closed', 2200);
@@ -186,6 +195,7 @@ const overlay = () => {
     document.querySelector('#importText').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
   });
   await wait(2200);
+  await snap();
   await click('#importRun', { after: 1600 });
   await caption('CSV · JSONL(AI용) · Confluence 마크업으로 내보내기도 가능', '', 1800);
 
@@ -195,10 +205,12 @@ const overlay = () => {
   await click('button[title="디자인 컬러 변경"]', { after: 600 });
   for (const hex of ['#0d9488', '#7c3aed', '#1428a0']) await click(`[data-accent="${hex}"]`, { after: 700 });
   await click('[data-sidebar-style="accent"]', { after: 900 });
+  await snap();
   await click('[data-sidebar-style="light"]', { after: 900 });
   await click('[data-mode="dark"]', { after: 1200 });
   await click('[data-accent="#e11d48"]', { after: 900 });
   await click('[data-sidebar-style="black"]', { after: 1400 });
+  await snap();
   await click('#themeReset', { after: 900 });
   await p.mouse.move(700, 450, { steps: 10 });
   await p.keyboard.press('Escape');
