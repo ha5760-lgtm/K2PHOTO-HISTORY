@@ -7,6 +7,7 @@
     <link href="{{ url_for('static', filename='vendor/bootstrap.min.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='vendor/bootstrap-icons.min.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/main.css') }}" rel="stylesheet">
+    <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
 </head>
 <body>
 <nav class="sidebar" id="sidebar">
@@ -18,12 +19,12 @@
         <button class="sidebar-toggle" id="sidebarToggle"><i class="bi bi-list"></i></button>
     </div>
     <ul class="sidebar-nav">
-        <li><a href="#daily" class="sidebar-nav-link active" data-view="daily"><i class="bi bi-pencil-square"></i><span>일일 작업 입력</span></a></li>
-        <li><a href="#history" class="sidebar-nav-link" data-view="history"><i class="bi bi-table"></i><span>작업 이력</span></a></li>
-        <li><a href="#stats" class="sidebar-nav-link" data-view="stats"><i class="bi bi-bar-chart-line"></i><span>셋업 현황</span></a></li>
+        <li><a href="#history" class="sidebar-nav-link active" data-view="history" title="작업 이력"><i class="bi bi-table"></i><span>Work History</span></a></li>
+        <li><a href="#daily" class="sidebar-nav-link" data-view="daily" title="일일 작업 입력"><i class="bi bi-pencil-square"></i><span>Daily Log</span></a></li>
+        <li><a href="#stats" class="sidebar-nav-link" data-view="stats" title="셋업 현황"><i class="bi bi-bar-chart-line"></i><span>Setup Dashboard</span></a></li>
         <li class="sidebar-divider"></li>
-        <li><a href="#io" class="sidebar-nav-link" data-view="io"><i class="bi bi-arrow-left-right"></i><span>가져오기 / 내보내기</span></a></li>
-        <li><a href="#ai" class="sidebar-nav-link" data-view="ai"><i class="bi bi-robot"></i><span>AI 활용</span></a></li>
+        <li><a href="#io" class="sidebar-nav-link" data-view="io" title="가져오기 / 내보내기"><i class="bi bi-arrow-left-right"></i><span>Import / Export</span></a></li>
+        <li><a href="#ai" class="sidebar-nav-link" data-view="ai" title="AI 활용"><i class="bi bi-robot"></i><span>AI Assistant</span></a></li>
     </ul>
     <div class="sidebar-footer"><small class="sidebar-footer-text text-muted">K2 Line Setup · v0.1 draft</small></div>
 </nav>
@@ -32,7 +33,7 @@
     <header class="topbar">
         <div class="topbar-left">
             <button class="btn btn-link d-md-none p-0" id="mobileSidebarToggle"><i class="bi bi-list fs-4"></i></button>
-            <h5 class="topbar-title mb-0" id="pageTitle">일일 작업 입력</h5>
+            <h5 class="topbar-title mb-0" id="pageTitle">Work History</h5>
         </div>
         <div class="topbar-center">
             <div class="search-trigger">
@@ -48,111 +49,123 @@
                 <i class="bi bi-person-circle"></i>
                 <input type="text" id="globalAuthor" class="author-input" placeholder="작성자 이름">
             </div>
+            <div class="dropdown">
+                <button class="theme-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="디자인 컬러 변경"><i class="bi bi-palette"></i><span class="theme-toggle-label">Theme</span></button>
+                <div class="dropdown-menu dropdown-menu-end theme-panel">
+                    <div class="theme-panel-title">Accent color</div>
+                    <div class="swatch-grid" id="accentSwatches"></div>
+                    <div class="d-flex align-items-center gap-2 mt-2">
+                        <input type="color" class="form-control form-control-color form-control-sm" id="accentCustom" title="직접 선택">
+                        <input type="text" class="form-control form-control-sm font-mono" id="accentHex" maxlength="7" placeholder="#4361ee">
+                    </div>
+                    <div class="theme-panel-title mt-3">Sidebar</div>
+                    <div class="seg" id="sidebarStyles"></div>
+                    <div class="theme-panel-title mt-3">Mode</div>
+                    <div class="seg" id="modeButtons">
+                        <button type="button" data-mode="light"><i class="bi bi-sun"></i> Light</button>
+                        <button type="button" data-mode="dark"><i class="bi bi-moon-stars"></i> Dark</button>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-light w-100 mt-3" id="themeReset"><i class="bi bi-arrow-counterclockwise"></i> 기본값으로</button>
+                </div>
+            </div>
             <button class="theme-toggle" id="themeToggle" type="button"><i class="bi bi-moon-stars"></i><span class="theme-toggle-label">Dark</span></button>
         </div>
     </header>
 
-    <!-- ─── 일일 작업 입력 ─── -->
-    <section class="view container-fluid px-4 py-4" id="view-daily">
-        <div class="row g-4">
-            <div class="col-xl-5">
-                <div class="card shadow-sm entry-card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <span class="fw-semibold"><i class="bi bi-lightning-charge text-primary me-1"></i> 빠른 입력</span>
-                        <small class="text-muted"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 저장</small>
-                    </div>
-                    <div class="card-body">
-                        <form id="entryForm" autocomplete="off">
-                            <div class="row g-3">
-                                <div class="col-12">
-                                    <label class="form-label">날짜</label>
-                                    <div class="input-group">
-                                        <button class="btn btn-outline-secondary" type="button" data-date-shift="-1" title="전날"><i class="bi bi-chevron-left"></i></button>
-                                        <input type="date" class="form-control" name="work_date" id="entryDate" required>
-                                        <span class="input-group-text" id="entryWeekday">-</span>
-                                        <button class="btn btn-outline-secondary" type="button" data-date-shift="1" title="다음날"><i class="bi bi-chevron-right"></i></button>
-                                        <button class="btn btn-outline-secondary" type="button" data-date-shift="today">오늘</button>
-                                    </div>
+    <!-- ─── Daily Log ─── -->
+    <section class="view container-fluid px-4 py-4" id="view-daily" hidden>
+        <div class="card shadow-sm entry-card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="fw-semibold"><i class="bi bi-lightning-charge text-primary me-1"></i> Quick Entry <small class="text-muted fw-normal">빠른 입력</small></span>
+                <small class="text-muted"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 저장 · <kbd>Alt</kbd>+<kbd>A</kbd> AI 정리</small>
+            </div>
+            <div class="card-body" id="entryHome">
+                <form id="entryForm" autocomplete="off">
+                    <div class="entry-grid">
+                        <div class="entry-meta">
+                            <div>
+                                <label class="mini-label">날짜</label>
+                                <div class="input-group input-group-sm">
+                                    <button class="btn btn-outline-secondary" type="button" data-date-shift="-1" title="전날"><i class="bi bi-chevron-left"></i></button>
+                                    <input type="date" class="form-control" name="work_date" id="entryDate" required>
+                                    <span class="input-group-text" id="entryWeekday">-</span>
+                                    <button class="btn btn-outline-secondary" type="button" data-date-shift="1" title="다음날"><i class="bi bi-chevron-right"></i></button>
+                                    <button class="btn btn-outline-secondary" type="button" data-date-shift="today">오늘</button>
                                 </div>
-                                <div class="col-12">
-                                    <label class="form-label">작업시간</label>
-                                    <div class="d-flex align-items-center gap-2">
-                                        <input type="time" class="form-control" name="start_time" id="entryStart">
-                                        <span class="text-muted">~</span>
-                                        <input type="time" class="form-control" name="end_time" id="entryEnd">
-                                    </div>
-                                </div>
-                                <div class="col-12 time-presets">
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-time-preset="now">지금</button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-dur="30">+30분</button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-dur="60">+1h</button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-dur="120">+2h</button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-dur="240">+4h</button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-time-preset="day">주간 08~17</button>
-                                    <span class="duration-display ms-auto" id="durationDisplay">-</span>
-                                </div>
-                                <div class="col-12">
-                                    <label class="form-label d-flex justify-content-between">
-                                        <span>설비호기 <small class="text-muted">(복수 선택 가능)</small></span>
-                                        <a href="#" class="small" id="addEquipLink"><i class="bi bi-plus-circle"></i> 호기 추가</a>
-                                    </label>
-                                    <div class="chip-group" id="equipChips"></div>
-                                </div>
-                                <div class="col-12">
-                                    <label class="form-label">분류</label>
-                                    <div class="work-type-grid" id="categoryGrid">
-                                        {% for code, label, icon in categories %}
-                                        <button type="button" class="work-type-btn{% if code == 'ETC' %} active{% endif %}" data-category="{{ code }}"><i class="bi {{ icon }}"></i>{{ label }}</button>
-                                        {% endfor %}
-                                    </div>
-                                </div>
-                                <div class="col-12">
-                                    <label class="form-label d-flex justify-content-between align-items-end">
-                                        <span>작업내용</span>
-                                        <button type="button" class="btn btn-ai" data-ai="entry" title="메모를 정리해서 작업내용·요약·분류·호기·시간을 자동 기입 (Alt+A)"><i class="bi bi-stars"></i> AI 정리</button>
-                                    </label>
-                                    <div class="body-editor" data-drop="entry">
-                                        <textarea class="form-control" name="content" id="entryContent" rows="5" required
-                                            placeholder="대충 적어도 됩니다. 예) paa7302 13:00-17:30 stage leveling 확인 z offset 재조정 내일 재측정&#10;캡처는 여기서 Ctrl+V"></textarea>
-                                        <div class="attach-strip" id="entryAttachments"></div>
-                                        <div class="body-editor-foot"><i class="bi bi-clipboard-plus"></i> 캡처 <kbd>Ctrl</kbd>+<kbd>V</kbd> 붙여넣기 · 드래그&amp;드롭 → 즉시 서버 저장</div>
-                                    </div>
-                                    <div class="ai-result" id="entryAiResult" hidden></div>
-                                </div>
-                                <div class="col-12">
-                                    <label class="form-label">요약 <small class="text-muted">(비우면 첫 줄로 자동 요약)</small></label>
-                                    <input type="text" class="form-control" name="summary" id="entrySummary" maxlength="120" placeholder="한 줄 요약">
-                                </div>
-                                <div class="col-12 d-flex gap-2">
-                                    <button type="submit" class="btn btn-primary flex-fill" id="entrySubmit"><i class="bi bi-check-lg"></i> 저장</button>
-                                    <button type="button" class="btn btn-outline-secondary" id="entryCancelEdit" hidden><i class="bi bi-x-lg"></i> 수정 취소</button>
-                                    <button type="button" class="btn btn-outline-secondary" id="entryReset" title="입력 초기화"><i class="bi bi-eraser"></i></button>
-                                </div>
-                                <div class="col-12"><small class="text-muted" id="draftNote"><i class="bi bi-info-circle"></i> 입력 중인 내용은 브라우저에 임시 보관되고, 저장 시 DB에 기록됩니다.</small></div>
                             </div>
-                        </form>
+                            <div>
+                                <label class="mini-label">작업시간 <span class="duration-display" id="durationDisplay">-</span></label>
+                                <div class="d-flex align-items-center gap-1">
+                                    <input type="time" class="form-control form-control-sm" name="start_time" id="entryStart">
+                                    <span class="text-muted">~</span>
+                                    <input type="time" class="form-control form-control-sm" name="end_time" id="entryEnd">
+                                </div>
+                                <div class="time-presets mt-1">
+                                    <button type="button" class="btn btn-outline-secondary" data-time-preset="now">지금</button>
+                                    <button type="button" class="btn btn-outline-secondary" data-dur="30">+30m</button>
+                                    <button type="button" class="btn btn-outline-secondary" data-dur="60">+1h</button>
+                                    <button type="button" class="btn btn-outline-secondary" data-dur="120">+2h</button>
+                                    <button type="button" class="btn btn-outline-secondary" data-dur="240">+4h</button>
+                                    <button type="button" class="btn btn-outline-secondary" data-time-preset="day">08~17</button>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="mini-label">설비호기 <a href="#" class="fw-normal" id="addEquipLink"><i class="bi bi-plus-circle"></i> 추가</a></label>
+                                <div class="chip-group chip-group-sm" id="equipChips"></div>
+                            </div>
+                            <div>
+                                <label class="mini-label">분류</label>
+                                <div class="cat-pills" id="categoryGrid">{% for code, label, icon in categories %}<button type="button" class="work-type-btn{% if code == 'ETC' %} active{% endif %}" data-category="{{ code }}"><i class="bi {{ icon }}"></i>{{ label }}</button>{% endfor %}</div>
+                            </div>
+                            <div>
+                                <label class="mini-label">요약 <small class="fw-normal">비우면 첫 줄로 자동</small></label>
+                                <input type="text" class="form-control form-control-sm" name="summary" id="entrySummary" maxlength="120" placeholder="한 줄 요약">
+                            </div>
+                        </div>
+                        <div class="entry-body">
+                            <label class="mini-label">작업내용
+                                <button type="button" class="btn btn-ai" data-ai title="메모를 정리해서 작업내용·요약·분류·호기·시간을 자동 기입 (Alt+A)"><i class="bi bi-stars"></i> AI 정리</button>
+                            </label>
+                            <div class="body-editor" data-drop>
+                                <textarea class="form-control" name="content" id="entryContent" rows="12" required
+                                    placeholder="대충 적어도 됩니다. 예) paa7302 13:00-17:30 stage leveling 확인 z offset 재조정 내일 재측정&#10;캡처는 여기서 Ctrl+V"></textarea>
+                                <div class="attach-strip" id="entryAttachments"></div>
+                                <div class="body-editor-foot"><i class="bi bi-clipboard-plus"></i> 캡처 <kbd>Ctrl</kbd>+<kbd>V</kbd> · 드래그&amp;드롭 → 즉시 서버 저장</div>
+                            </div>
+                            <div class="ai-result" id="entryAiResult" hidden></div>
+                        </div>
                     </div>
-                </div>
-            </div>
-            <div class="col-xl-7">
-                <div class="row g-3 mb-3">
-                    <div class="col-sm-4"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="bi bi-list-check"></i></div><div><div class="kpi-value" id="dayCount">0</div><div class="kpi-label">선택일 작업 건수</div></div></div></div>
-                    <div class="col-sm-4"><div class="kpi-card kpi-green"><div class="kpi-icon"><i class="bi bi-clock"></i></div><div><div class="kpi-value" id="dayHours">0h</div><div class="kpi-label">선택일 작업시간</div></div></div></div>
-                    <div class="col-sm-4"><div class="kpi-card kpi-amber"><div class="kpi-icon"><i class="bi bi-hdd-rack"></i></div><div><div class="kpi-value" id="dayEquip">0</div><div class="kpi-label">작업 설비 수</div></div></div></div>
-                </div>
-                <div class="card shadow-sm">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <span class="fw-semibold"><i class="bi bi-calendar-day me-1"></i> <span id="dayTitle">오늘</span> 작업 내역</span>
-                        <button class="btn btn-sm btn-outline-primary" id="copyDayConfluence"><i class="bi bi-clipboard"></i> Confluence 표로 복사</button>
+                    <div class="entry-actions">
+                        <small class="text-muted me-auto" id="draftNote"><i class="bi bi-info-circle"></i> 입력 중인 내용은 임시 보관, 저장 시 DB 기록</small>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="entryDelete" hidden><i class="bi bi-trash"></i> 삭제</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="entryReset" title="입력 초기화"><i class="bi bi-eraser"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="entryCancelEdit" hidden><i class="bi bi-x-lg"></i> 수정 취소</button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="entrySubmitNext" hidden><i class="bi bi-plus-lg"></i> 저장 후 계속</button>
+                        <button type="submit" class="btn btn-sm btn-primary px-4" id="entrySubmit"><i class="bi bi-check-lg"></i> 저장</button>
                     </div>
-                    <div class="card-body p-0" id="dayTimeline"></div>
-                </div>
+                </form>
             </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-sm-4"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="bi bi-list-check"></i></div><div><div class="kpi-value" id="dayCount">0</div><div class="kpi-label">선택일 작업 건수</div></div></div></div>
+            <div class="col-sm-4"><div class="kpi-card kpi-green"><div class="kpi-icon"><i class="bi bi-clock"></i></div><div><div class="kpi-value" id="dayHours">0h</div><div class="kpi-label">선택일 작업시간</div></div></div></div>
+            <div class="col-sm-4"><div class="kpi-card kpi-amber"><div class="kpi-icon"><i class="bi bi-hdd-rack"></i></div><div><div class="kpi-value" id="dayEquip">0</div><div class="kpi-label">작업 설비 수</div></div></div></div>
+        </div>
+        <div class="card shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="fw-semibold"><i class="bi bi-calendar-day me-1"></i> <span id="dayTitle">오늘</span> 작업 내역</span>
+                <button class="btn btn-sm btn-outline-primary" id="copyDayConfluence"><i class="bi bi-clipboard"></i> Confluence 표로 복사</button>
+            </div>
+            <div class="card-body p-0" id="dayTimeline"></div>
         </div>
     </section>
 
     <!-- ─── 작업 이력 ─── -->
-    <section class="view container-fluid px-4 py-4" id="view-history" hidden>
+    <section class="view container-fluid px-4 py-4" id="view-history">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="text-muted small">작업 이력 · Confluence 표 대체</div>
+            <button class="btn btn-primary" data-new-log><i class="bi bi-plus-lg me-1"></i> 작업 입력 <small class="opacity-75">New Log</small></button>
+        </div>
         <div class="card shadow-sm mb-4">
             <div class="card-body">
                 <form class="row g-3 align-items-end" id="filterForm">
@@ -279,37 +292,19 @@
     </section>
 </div>
 
-<!-- Edit Modal -->
-<div class="modal fade" id="editModal" tabindex="-1">
-    <div class="modal-dialog modal-lg"><div class="modal-content">
-        <div class="modal-header"><h5 class="modal-title"><i class="bi bi-pencil"></i> 작업 수정</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body">
-            <div class="row g-3">
-                <div class="col-md-4"><label class="form-label">날짜</label><input type="date" class="form-control" id="editDate"></div>
-                <div class="col-md-4"><label class="form-label">시작</label><input type="time" class="form-control" id="editStart"></div>
-                <div class="col-md-4"><label class="form-label">종료</label><input type="time" class="form-control" id="editEnd"></div>
-                <div class="col-md-8"><label class="form-label">설비호기 <small class="text-muted">(콤마 구분, 공통)</small></label><input type="text" class="form-control" id="editEquip"></div>
-                <div class="col-md-4"><label class="form-label">분류</label><select class="form-select" id="editCategory"></select></div>
-                <div class="col-12">
-                    <label class="form-label d-flex justify-content-between align-items-end"><span>작업내용</span>
-                        <button type="button" class="btn btn-ai" data-ai="edit"><i class="bi bi-stars"></i> AI 정리</button></label>
-                    <div class="body-editor" data-drop="edit">
-                        <textarea class="form-control" id="editContent" rows="5"></textarea>
-                        <div class="attach-strip" id="editAttachments"></div>
-                        <div class="body-editor-foot"><i class="bi bi-clipboard-plus"></i> 캡처 <kbd>Ctrl</kbd>+<kbd>V</kbd> → 이 기록에 바로 저장됩니다</div>
-                    </div>
-                    <div class="ai-result" id="editAiResult" hidden></div>
-                </div>
-                <div class="col-12"><label class="form-label">요약</label><input type="text" class="form-control" id="editSummary"></div>
-            </div>
+<!-- Entry Modal: #entryForm 이 열릴 때 이 안으로 옮겨짐 -->
+<div class="modal fade" id="entryModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
+        <div class="modal-header py-2">
+            <h6 class="modal-title" id="entryModalTitle"></h6>
+            <small class="text-muted ms-3 d-none d-md-inline"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 저장 · <kbd>Alt</kbd>+<kbd>A</kbd> AI 정리 · <kbd>Esc</kbd> 닫기</small>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-outline-danger me-auto" id="editDelete"><i class="bi bi-trash"></i> 삭제</button>
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
-            <button type="button" class="btn btn-primary" id="editSave"><i class="bi bi-check-lg"></i> 저장</button>
-        </div>
+        <div class="modal-body" id="entryModalBody"></div>
     </div></div>
 </div>
+
+<button class="fab-button" data-new-log title="작업 입력 (N)"><i class="bi bi-plus-lg"></i></button>
 
 <!-- Lightbox -->
 <div class="modal fade" id="lightbox" tabindex="-1">

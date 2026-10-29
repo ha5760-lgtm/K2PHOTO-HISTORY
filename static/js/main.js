@@ -5,13 +5,12 @@ const state = {
     meta: { equipment: [], categories: [], authors: [] },
     selectedEquip: new Set(),
     category: 'ETC',
-    editingId: null,       // 빠른 입력 폼으로 수정 중인 id
-    modalId: null,         // 수정 모달 대상 id
+    editingId: null,       // 입력 폼으로 수정 중인 기록 id (Daily Log 인라인 또는 팝업)
     dayLogs: [],
     historyLogs: [],
     charts: {},
-    attachments: { entry: [], edit: [] },   // 캡처 첨부 (scope 별)
-    aiUndo: {},
+    attachments: [],       // 입력 폼의 캡처 첨부
+    aiUndo: null,
     version: null,
 };
 const COMMON = window.COMMON || '공통';
@@ -92,10 +91,12 @@ async function api(url, opts = {}) {
 }
 
 // ─── Navigation ───────────────────────────────────────
-const VIEW_TITLES = { daily: '일일 작업 입력', history: '작업 이력', stats: '셋업 현황', io: '가져오기 / 내보내기', ai: 'AI 활용' };
+const VIEW_TITLES = { history: 'Work History', daily: 'Daily Log', stats: 'Setup Dashboard', io: 'Import / Export', ai: 'AI Assistant' };
+const DEFAULT_VIEW = 'history';
+const currentView = () => Object.keys(VIEW_TITLES).find((v) => !$(`#view-${v}`).hidden) || DEFAULT_VIEW;
 
 function switchView(view) {
-    if (!VIEW_TITLES[view]) view = 'daily';
+    if (!VIEW_TITLES[view]) view = DEFAULT_VIEW;
     $$('.view').forEach((v) => (v.hidden = v.id !== `view-${view}`));
     $$('.sidebar-nav-link').forEach((a) => a.classList.toggle('active', a.dataset.view === view));
     $('#pageTitle').textContent = VIEW_TITLES[view];
@@ -114,7 +115,6 @@ async function loadMeta() {
     renderEquipChips();
     const catOpts = state.meta.categories.map((c) => `<option value="${c.code}">${esc(c.label)}</option>`).join('');
     $('#filterCategory').innerHTML = `<option value="">전체</option>${catOpts}`;
-    $('#editCategory').innerHTML = catOpts;
     $('#importCategory').innerHTML = catOpts;
     $('#importCategory').value = 'ETC';
     $('#filterEquip').innerHTML = `<option value="">전체</option><option value="${COMMON}">${COMMON}</option>` +
@@ -122,14 +122,10 @@ async function loadMeta() {
 }
 
 function renderEquipChips() {
-    const groups = {};
-    state.meta.equipment.forEach((e) => (groups[e.category || '기타'] ||= []).push(e));
-    let html = `<span class="chip chip-common ${state.selectedEquip.has(COMMON) ? 'active' : ''}" data-equip="${COMMON}"><i class="bi bi-diagram-3"></i>${COMMON}</span>`;
-    Object.entries(groups).forEach(([g, list]) => {
-        html += `<span class="chip-group-label">${esc(g)}</span>`;
-        html += list.map((e) => `<span class="chip ${state.selectedEquip.has(e.name) ? 'active' : ''}" data-equip="${esc(e.name)}">${esc(e.name)} <small>${esc(e.vendor || '')}</small></span>`).join('');
-    });
-    $('#equipChips').innerHTML = html;
+    const chip = (name, extra, inner) => `<span class="chip ${extra} ${state.selectedEquip.has(name) ? 'active' : ''}" data-equip="${esc(name)}" title="${esc(inner.title || '')}">${inner.html}</span>`;
+    $('#equipChips').innerHTML = chip(COMMON, 'chip-common', { html: `<i class="bi bi-diagram-3"></i>${COMMON}`, title: '설비 공통 작업' }) +
+        state.meta.equipment.map((e) => chip(e.name, e.category === 'Scanner' ? 'scanner' : '',
+            { html: esc(e.name), title: `${e.vendor || ''} ${e.category || ''}` })).join('');
 }
 
 function toggleEquip(name) {
@@ -143,16 +139,17 @@ function toggleEquip(name) {
     saveDraft();
 }
 
-function setCategory(code) {
+function setCategory(code, save = true) {
     state.category = code;
     $$('#categoryGrid .work-type-btn').forEach((b) => b.classList.toggle('active', b.dataset.category === code));
-    saveDraft();
+    if (save) saveDraft();
 }
 
 // ─── Entry form ───────────────────────────────────────
 function updateDuration() {
     const m = minutesBetween($('#entryStart').value, $('#entryEnd').value);
     $('#durationDisplay').textContent = m == null ? '-' : fmtDur(m) || '0m';
+    $('#entryWeekday').textContent = weekday($('#entryDate').value || today());
 }
 
 function formPayload() {
@@ -165,14 +162,14 @@ function formPayload() {
         content: $('#entryContent').value,
         summary: $('#entrySummary').value,
         author: $('#globalAuthor').value,
-        attachment_ids: state.attachments.entry.filter((a) => a.id).map((a) => a.id),
+        attachment_ids: state.attachments.filter((a) => a.id).map((a) => a.id),
     };
 }
 
 function saveDraft() {
     if (state.editingId) return;
     const p = formPayload();
-    const attachments = state.attachments.entry.filter((a) => a.id).map(({ id, url, name }) => ({ id, url, name }));
+    const attachments = state.attachments.filter((a) => a.id).map(({ id, url, name }) => ({ id, url, name }));
     storage(DRAFT_KEY, JSON.stringify({ ...p, author: undefined, attachment_ids: undefined, attachments }));
 }
 
@@ -186,57 +183,79 @@ function restoreDraft() {
     $('#entryContent').value = d.content || '';
     $('#entrySummary').value = d.summary || '';
     state.selectedEquip = new Set(d.equipment || []);
-    if (d.category) setCategory(d.category);
-    state.attachments.entry = (d.attachments || []).map((a) => ({ ...a, key: `a${a.id}`, status: 'done' }));
-    renderAttachments('entry');
+    if (d.category) setCategory(d.category, false);
+    state.attachments = (d.attachments || []).map((a) => ({ ...a, key: `a${a.id}`, status: 'done' }));
+    renderAttachments();
     updateDuration();
 }
 
-function resetForm(keepDate = true) {
+function setEditUi(editing) {
+    $('#entrySubmit').innerHTML = editing ? '<i class="bi bi-check-lg"></i> 수정 저장' : '<i class="bi bi-check-lg"></i> 저장';
+    $('#entryCancelEdit').hidden = !editing || state.entryInModal;
+    $('#entryDelete').hidden = !editing;
+    $('#entrySubmitNext').hidden = editing || !state.entryInModal;
+    $('#entryAiResult').hidden = true;
+}
+
+function clearForm(keepDate = true) {
     const date = $('#entryDate').value;
     $('#entryForm').reset();
     $('#entryDate').value = keepDate && date ? date : today();
     state.selectedEquip = new Set();
-    state.editingId = null;
-    $('#entrySubmit').innerHTML = '<i class="bi bi-check-lg"></i> 저장';
-    $('#entryCancelEdit').hidden = true;
-    state.attachments.entry = [];
-    renderAttachments('entry');
-    $('#entryAiResult').hidden = true;
+    setCategory('ETC', false);  // 수정 취소 시 임시보관을 덮어쓰지 않도록 저장하지 않음
+    state.attachments = [];
+    renderAttachments();
     renderEquipChips();
     updateDuration();
+}
+
+// 저장 완료 / 초기화: 폼과 임시보관 모두 비움
+function resetForm(keepDate = true) {
+    state.editingId = null;
+    clearForm(keepDate);
     storage(DRAFT_KEY, null);
+    setEditUi(false);
     renderDay();
 }
 
-async function submitEntry(e) {
+// 수정 취소: 수정 전에 쓰던 임시보관 내용으로 복귀
+function cancelEdit() {
+    state.editingId = null;
+    clearForm(false);
+    restoreDraft();
+    setEditUi(false);
+    renderDay();
+}
+
+async function submitEntry(e, keepOpen = false) {
     e && e.preventDefault();
     const p = formPayload();
     if (!p.content.trim()) { $('#entryContent').focus(); toast('작업내용을 입력하세요', 'danger'); return; }
     if (!p.equipment.length) p.equipment = [COMMON];
     setIndicator('saving', '저장 중…');
     try {
-        const lastEnd = p.end_time;
-        if (state.editingId) {
+        const wasEditing = !!state.editingId;
+        if (wasEditing) {
             await api(`/api/logs/${state.editingId}`, { method: 'PUT', body: JSON.stringify(p) });
             toast('수정되었습니다');
         } else {
             await api('/api/logs', { method: 'POST', body: JSON.stringify(p) });
             toast('DB에 저장되었습니다');
         }
-        const wasEditing = !!state.editingId;
         resetForm();
-        if (!wasEditing && lastEnd) $('#entryStart').value = lastEnd;
+        // 연속 입력: 다음 작업 시작시간 = 직전 종료시간
+        if (!wasEditing && p.end_time) $('#entryStart').value = p.end_time;
         setIndicator('', `저장됨 ${new Date().toTimeString().slice(0, 5)}`);
-        await loadDay();
-        $('#entryContent').focus();
+        if (state.entryInModal && !keepOpen) entryModalObj.hide();
+        else $('#entryContent').focus();
+        refreshCurrent();
     } catch (err) {
         setIndicator('error', '저장 실패');
         toast(err.message, 'danger');
     }
 }
 
-function startEditInForm(log) {
+function startEdit(log) {
     state.editingId = log.id;
     $('#entryDate').value = log.work_date;
     $('#entryStart').value = log.start_time || '';
@@ -245,14 +264,45 @@ function startEditInForm(log) {
     $('#entrySummary').value = log.summary_auto ? '' : log.summary || '';
     state.selectedEquip = new Set(log.equipment_list);
     setCategory(log.category);
-    state.attachments.entry = log.attachments.map((a) => ({ ...a, key: `a${a.id}`, status: 'done' }));
-    renderAttachments('entry');
+    state.attachments = log.attachments.map((a) => ({ ...a, key: `a${a.id}`, status: 'done' }));
+    renderAttachments();
     renderEquipChips();
     updateDuration();
-    $('#entrySubmit').innerHTML = '<i class="bi bi-check-lg"></i> 수정 저장';
-    $('#entryCancelEdit').hidden = false;
+    setEditUi(true);
     renderDay();
     $('#entryContent').focus();
+}
+
+// ─── Entry popup (Work History 등에서 작업 입력) ──────
+// Daily Log 의 #entryForm 을 그대로 팝업으로 옮겨 씀 → 입력 방식/단축키/임시보관이 동일
+let entryModalObj;
+function openEntryModal(log = null) {
+    state.entryInModal = true;
+    $('#entryModalBody').appendChild($('#entryForm'));
+    if (log) startEdit(log);
+    else if (state.editingId) cancelEdit();
+    else setEditUi(false);
+    updateDuration();
+    $('#entryModalTitle').innerHTML = log
+        ? `<i class="bi bi-pencil-square me-1"></i> Edit Work Log <small class="text-muted">${esc(log.work_date)}</small>`
+        : '<i class="bi bi-plus-square me-1"></i> New Work Log <small class="text-muted">작업 입력</small>';
+    entryModalObj = entryModalObj || new bootstrap.Modal('#entryModal');
+    entryModalObj.show();
+}
+
+function onEntryModalHidden() {
+    state.entryInModal = false;
+    $('#entryHome').appendChild($('#entryForm'));
+    if (state.editingId) cancelEdit(); else setEditUi(false);
+}
+
+function newLog() {
+    if (currentView() === 'daily') {
+        if (state.editingId) cancelEdit();
+        $('#entryContent').focus();
+    } else {
+        openEntryModal();
+    }
 }
 
 // ─── Daily view ───────────────────────────────────────
@@ -306,14 +356,17 @@ async function deleteLog(id) {
     try {
         await api(`/api/logs/${id}`, { method: 'DELETE' });
         toast('삭제되었습니다');
-        if (state.editingId === id) resetForm();
+        if (state.editingId === id) cancelEdit();
+        if (state.entryInModal) entryModalObj.hide();
         refreshCurrent();
     } catch (err) { toast(err.message, 'danger'); }
 }
 
 function refreshCurrent() {
-    const view = location.hash.slice(1) || 'daily';
-    if (view === 'history') loadHistory(); else loadDay();
+    const view = currentView();
+    if (view === 'history') loadHistory();
+    else if (view === 'stats') loadStats();
+    else loadDay();
 }
 
 // ─── History view ─────────────────────────────────────
@@ -363,72 +416,29 @@ function setRange(r) {
     loadHistory();
 }
 
-// ─── Edit modal ───────────────────────────────────────
-let modalObj;
-function openEditModal(log) {
-    state.modalId = log.id;
-    $('#editDate').value = log.work_date;
-    $('#editStart').value = log.start_time || '';
-    $('#editEnd').value = log.end_time || '';
-    $('#editEquip').value = log.equipment;
-    $('#editCategory').value = log.category;
-    $('#editContent').value = log.content;
-    $('#editSummary').value = log.summary_auto ? '' : log.summary || '';
-    $('#editSummary').placeholder = log.summary_auto ? `자동 요약: ${log.summary}` : '';
-    state.attachments.edit = log.attachments.map((a) => ({ ...a, key: `a${a.id}`, status: 'done' }));
-    renderAttachments('edit');
-    $('#editAiResult').hidden = true;
-    modalObj = modalObj || new bootstrap.Modal('#editModal');
-    modalObj.show();
-}
-
-async function saveModal() {
-    const body = {
-        work_date: $('#editDate').value,
-        start_time: $('#editStart').value || null,
-        end_time: $('#editEnd').value || null,
-        equipment: $('#editEquip').value,
-        category: $('#editCategory').value,
-        content: $('#editContent').value,
-        summary: $('#editSummary').value,
-    };
-    try {
-        await api(`/api/logs/${state.modalId}`, { method: 'PUT', body: JSON.stringify(body) });
-        modalObj.hide();
-        toast('수정되었습니다');
-        refreshCurrent();
-    } catch (err) { toast(err.message, 'danger'); }
-}
-
 // ─── 캡처 붙여넣기 (Ctrl+V → 즉시 서버 저장) ─────────
 let attSeq = 0;
-// entry 폼에서 기존 기록 수정 중이거나 수정 모달이면 해당 기록에 바로 연결 저장
-const targetLogId = (scope) => (scope === 'edit' ? state.modalId : state.editingId);
 
-function renderAttachments(scope) {
-    const el = $(scope === 'edit' ? '#editAttachments' : '#entryAttachments');
-    el.innerHTML = state.attachments[scope].map((a) => `
+function renderAttachments() {
+    $('#entryAttachments').innerHTML = state.attachments.map((a) => `
         <div class="thumb ${a.status === 'uploading' ? 'uploading' : ''} ${a.status === 'failed' ? 'failed' : ''}" data-lightbox="${esc(a.url || a.localUrl)}" data-name="${esc(a.name || '')}" title="${esc(a.name || '')}">
             <img src="${esc(a.localUrl || a.url)}" alt="">
             ${a.status === 'done' ? '<span class="thumb-ok"><i class="bi bi-cloud-check"></i> 저장</span>' : ''}
-            <button type="button" class="thumb-x" data-remove-att="${scope}:${a.key}" title="삭제"><i class="bi bi-x-lg"></i></button>
+            <button type="button" class="thumb-x" data-remove-att="${a.key}" title="삭제"><i class="bi bi-x-lg"></i></button>
         </div>`).join('');
 }
 
-function refreshLinked() {
-    if (!$('#view-history').hidden) loadHistory(); else loadDay();
-}
-
-async function uploadImages(scope, files) {
+async function uploadImages(files) {
     const images = [...files].filter((f) => f.type.startsWith('image/'));
     if (!images.length) return;
+    // 기존 기록 수정 중이면 그 기록에 바로 연결 저장, 새 입력이면 저장 시 연결
+    const logId = state.editingId;
     await Promise.all(images.map(async (file) => {
         const item = { key: `u${++attSeq}`, name: file.name, status: 'uploading', localUrl: URL.createObjectURL(file) };
-        state.attachments[scope].push(item);
-        renderAttachments(scope);
+        state.attachments.push(item);
+        renderAttachments();
         const fd = new FormData();
         fd.append('file', file, file.name && file.name !== 'image.png' ? file.name : `capture.${(file.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`);
-        const logId = targetLogId(scope);
         if (logId) fd.append('log_id', logId);
         setIndicator('saving', '캡처 업로드 중…');
         try {
@@ -442,35 +452,34 @@ async function uploadImages(scope, files) {
             setIndicator('error', '업로드 실패');
             toast(`캡처 업로드 실패: ${err.message}`, 'danger');
         }
-        renderAttachments(scope);
+        renderAttachments();
     }));
-    if (scope === 'entry') saveDraft();
-    if (targetLogId(scope)) refreshLinked();
-    toast(targetLogId(scope) ? '캡처가 기록에 바로 저장되었습니다' : '캡처가 서버에 저장되었습니다 (작업 저장 시 함께 연결)');
+    saveDraft();
+    if (logId) refreshCurrent();
+    toast(logId ? '캡처가 기록에 바로 저장되었습니다' : '캡처가 서버에 저장되었습니다 (작업 저장 시 함께 연결)');
 }
 
-async function removeAttachment(scope, key) {
-    const list = state.attachments[scope];
-    const item = list.find((a) => a.key === key);
+async function removeAttachment(key) {
+    const item = state.attachments.find((a) => a.key === key);
     if (!item) return;
     if (item.id) {
         try { await api(`/api/attachments/${item.id}`, { method: 'DELETE' }); }
         catch (err) { toast(err.message, 'danger'); return; }
     }
     if (item.localUrl) URL.revokeObjectURL(item.localUrl);
-    state.attachments[scope] = list.filter((a) => a !== item);
-    renderAttachments(scope);
-    if (scope === 'entry') saveDraft();
-    if (item.id && item.log_id) refreshLinked();
+    state.attachments = state.attachments.filter((a) => a !== item);
+    renderAttachments();
+    saveDraft();
+    if (item.id && item.log_id) refreshCurrent();
 }
 
-function pasteScope(target) {
-    if ($('#editModal').classList.contains('show')) return 'edit';
-    if (!$('#view-daily').hidden) {
-        // 다른 입력칸(검색/작성자 등)에서 붙여넣기는 무시, 폼 내부나 빈 곳이면 본문 첨부
-        if (target.closest('#entryForm') || !target.closest('input, textarea, select')) return 'entry';
-    }
-    return null;
+// 입력 폼이 보이는 상태인가 (팝업 열림 또는 Daily Log 화면)
+const entryActive = () => state.entryInModal || currentView() === 'daily';
+
+function canPasteToEntry(target) {
+    if (!entryActive() || $('#lightbox').classList.contains('show')) return false;
+    // 다른 입력칸(검색/작성자 등)에서 붙여넣기는 무시, 폼 내부나 빈 곳이면 본문 첨부
+    return !!target.closest('#entryForm') || !target.closest('input, textarea, select');
 }
 
 function clipboardImages(dt) {
@@ -478,49 +487,36 @@ function clipboardImages(dt) {
 }
 
 // ─── AI 정리 ──────────────────────────────────────────
-const AI_FIELDS = {
-    entry: {
-        get: () => ({ content: $('#entryContent').value, summary: $('#entrySummary').value, category: state.category,
-            equipment: [...state.selectedEquip], start_time: $('#entryStart').value, end_time: $('#entryEnd').value,
-            work_date: $('#entryDate').value }),
-        set: (v) => {
-            $('#entryContent').value = v.content; $('#entrySummary').value = v.summary;
-            $('#entryStart').value = v.start_time || ''; $('#entryEnd').value = v.end_time || '';
-            state.selectedEquip = new Set(v.equipment); setCategory(v.category); renderEquipChips(); updateDuration(); saveDraft();
-        },
-        flash: ['#entryContent', '#entrySummary', '#entryStart', '#entryEnd', '#equipChips', '#categoryGrid'],
-        box: '#entryAiResult',
-    },
-    edit: {
-        get: () => ({ content: $('#editContent').value, summary: $('#editSummary').value, category: $('#editCategory').value,
-            equipment: $('#editEquip').value.split(/[,\s]+/).filter(Boolean), start_time: $('#editStart').value,
-            end_time: $('#editEnd').value, work_date: $('#editDate').value }),
-        set: (v) => {
-            $('#editContent').value = v.content; $('#editSummary').value = v.summary; $('#editCategory').value = v.category;
-            $('#editEquip').value = v.equipment.join(', '); $('#editStart').value = v.start_time || ''; $('#editEnd').value = v.end_time || '';
-        },
-        flash: ['#editContent', '#editSummary', '#editCategory', '#editEquip', '#editStart', '#editEnd'],
-        box: '#editAiResult',
-    },
-};
+const AI_FLASH = ['#entryContent', '#entrySummary', '#entryStart', '#entryEnd', '#equipChips', '#categoryGrid'];
 
-async function runAi(scope) {
-    const f = AI_FIELDS[scope];
-    const cur = f.get();
+function formValues() {
+    return { content: $('#entryContent').value, summary: $('#entrySummary').value, category: state.category,
+        equipment: [...state.selectedEquip], start_time: $('#entryStart').value, end_time: $('#entryEnd').value,
+        work_date: $('#entryDate').value };
+}
+
+function setFormValues(v) {
+    $('#entryContent').value = v.content; $('#entrySummary').value = v.summary;
+    $('#entryStart').value = v.start_time || ''; $('#entryEnd').value = v.end_time || '';
+    state.selectedEquip = new Set(v.equipment); setCategory(v.category); renderEquipChips(); updateDuration(); saveDraft();
+}
+
+async function runAi() {
+    const cur = formValues();
     if (!cur.content.trim()) { toast('정리할 메모를 작업내용에 먼저 적어주세요', 'danger'); return; }
-    const btn = $(`[data-ai="${scope}"]`);
+    const btn = $('[data-ai]');
     const label = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border"></span> 정리 중…';
     try {
         const r = await api('/api/ai/organize', { method: 'POST', body: JSON.stringify(cur) });
-        state.aiUndo[scope] = cur;
+        state.aiUndo = cur;
         // 시간은 비어 있을 때만, 호기는 기존 선택 + AI 인식 결과 합집합, 분류는 AI 가 특정했을 때만 덮어씀
         const found = r.equipment.filter((e) => e !== COMMON);
         let equipment = cur.equipment.filter((e) => e !== COMMON);
         equipment = [...new Set([...equipment, ...found])];
         if (!equipment.length) equipment = cur.equipment.length || r.equipment.includes(COMMON) ? [COMMON] : [];
-        const next = {
+        setFormValues({
             ...cur,
             content: r.content,
             summary: r.summary,
@@ -528,14 +524,13 @@ async function runAi(scope) {
             equipment,
             start_time: cur.start_time || r.start_time || '',
             end_time: cur.end_time || r.end_time || '',
-        };
-        f.set(next);
-        f.flash.forEach((sel) => { const el = $(sel); el.classList.remove('ai-filled'); void el.offsetWidth; el.classList.add('ai-filled'); });
+        });
+        AI_FLASH.forEach((sel) => { const el = $(sel); el.classList.remove('ai-filled'); void el.offsetWidth; el.classList.add('ai-filled'); });
         const list = (title, items) => (items.length ? `<div class="mt-1"><b>${title}</b><ul>${items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul></div>` : '');
-        const box = $(f.box);
+        const box = $('#entryAiResult');
         box.innerHTML = `<div class="ai-head"><i class="bi bi-stars"></i> AI 정리 완료
                 <span class="text-muted fw-normal">· ${r.engine === 'llm' ? 'LLM' : '규칙 기반'}${r.warning ? ` (${esc(r.warning)})` : ''}</span>
-                <button type="button" class="btn btn-sm btn-link ms-auto p-0" data-ai-undo="${scope}"><i class="bi bi-arrow-counterclockwise"></i> 되돌리기</button></div>
+                <button type="button" class="btn btn-sm btn-link ms-auto p-0" data-ai-undo><i class="bi bi-arrow-counterclockwise"></i> 되돌리기</button></div>
             ${list('이슈', r.issues)}${list('후속 조치', r.next_actions)}
             <div class="text-muted mt-1">내용을 확인한 뒤 저장하세요.</div>`;
         box.hidden = false;
@@ -547,11 +542,10 @@ async function runAi(scope) {
     }
 }
 
-function undoAi(scope) {
-    const prev = state.aiUndo[scope];
-    if (!prev) return;
-    AI_FIELDS[scope].set(prev);
-    $(AI_FIELDS[scope].box).hidden = true;
+function undoAi() {
+    if (!state.aiUndo) return;
+    setFormValues(state.aiUndo);
+    $('#entryAiResult').hidden = true;
     toast('AI 정리 전으로 되돌렸습니다');
 }
 
@@ -562,9 +556,10 @@ async function pollVersion() {
         const { version } = await api('/api/version');
         $('#liveBadge').classList.remove('off');
         if (state.version && version !== state.version) {
-            if (!$('#view-daily').hidden) loadDay(true);
-            else if (!$('#view-history').hidden) loadHistory();
-            else if (!$('#view-stats').hidden) loadStats();
+            const view = currentView();
+            if (view === 'daily') loadDay(true);
+            else if (view === 'history') loadHistory();
+            else if (view === 'stats') loadStats();
         }
         state.version = version;
     } catch (e) {
@@ -684,24 +679,64 @@ function applyTheme(t) {
         ? '<i class="bi bi-sun"></i><span class="theme-toggle-label">Light</span>'
         : '<i class="bi bi-moon-stars"></i><span class="theme-toggle-label">Dark</span>';
     storage('k2ph.theme', t);
+    renderThemePanel();
+    if (currentView() === 'stats') loadStats();  // 차트 색 갱신
+}
+
+function renderThemePanel() {
+    const T = window.K2Theme;
+    if (!T) return;
+    const cur = T.current();
+    $('#accentSwatches').innerHTML = T.ACCENTS.map((a) =>
+        `<button type="button" class="swatch ${a.hex === cur.accent ? 'active' : ''}" style="background:${a.hex}" data-accent="${a.hex}" title="${a.name}"></button>`).join('');
+    $('#accentCustom').value = cur.accent;
+    $('#accentHex').value = cur.accent;
+    $('#sidebarStyles').innerHTML = T.SIDEBARS.map((s) =>
+        `<button type="button" class="${s.key === cur.sidebar ? 'active' : ''}" data-sidebar-style="${s.key}">${s.label}</button>`).join('');
+    const mode = document.documentElement.getAttribute('data-bs-theme');
+    $$('#modeButtons [data-mode]').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+}
+
+function setAccent(hex) {
+    window.K2Theme.apply({ accent: hex });
+    renderThemePanel();
+    if (currentView() === 'stats') loadStats();
 }
 
 // ─── Init ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
     applyTheme(storage('k2ph.theme') || 'light');
+    $('.theme-panel').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-accent],[data-sidebar-style],[data-mode]');
+        if (!b) return;
+        if (b.dataset.accent) setAccent(b.dataset.accent);
+        else if (b.dataset.sidebarStyle) { window.K2Theme.apply({ sidebar: b.dataset.sidebarStyle }); renderThemePanel(); }
+        else if (b.dataset.mode) applyTheme(b.dataset.mode);
+    });
+    $('#accentCustom').addEventListener('input', (e) => setAccent(e.target.value));
+    $('#accentHex').addEventListener('change', (e) => {
+        const v = e.target.value.trim();
+        if (/^#?[0-9a-f]{6}$/i.test(v)) setAccent(v.startsWith('#') ? v : `#${v}`);
+        else { toast('#RRGGBB 형식으로 입력하세요', 'danger'); renderThemePanel(); }
+    });
+    $('#themeReset').addEventListener('click', () => {
+        window.K2Theme.reset(); applyTheme('light');
+        toast('기본 테마로 되돌렸습니다');
+    });
     $('#globalAuthor').value = storage('k2ph.author') || '';
     $('#importYear').value = new Date().getFullYear();
     if (storage('k2ph.sidebar') === 'collapsed') $('#sidebar').classList.add('collapsed');
 
     // 이벤트 위임
     document.addEventListener('click', (e) => {
-        const extra = e.target.closest('[data-remove-att],[data-lightbox],[data-ai],[data-ai-undo]');
+        const extra = e.target.closest('[data-remove-att],[data-lightbox],[data-ai],[data-ai-undo],[data-new-log]');
         if (extra) {
             const xs = extra.dataset;
-            if (xs.removeAtt) { e.stopPropagation(); const [sc, key] = xs.removeAtt.split(':'); removeAttachment(sc, key); }
+            if (xs.removeAtt) { e.stopPropagation(); removeAttachment(xs.removeAtt); }
             else if (xs.lightbox) openLightbox(xs.lightbox, xs.name);
-            else if (xs.ai) runAi(xs.ai);
-            else if (xs.aiUndo) undoAi(xs.aiUndo);
+            else if ('newLog' in xs) newLog();
+            else if ('aiUndo' in xs) undoAi();
+            else if ('ai' in xs) runAi();
             return;
         }
         const t = e.target.closest('[data-view],[data-equip],[data-category],[data-dur],[data-time-preset],[data-date-shift],[data-edit],[data-edit-inline],[data-copy],[data-delete],[data-range],[data-goto-equip],[data-export]');
@@ -725,9 +760,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             const d = new Date(($('#entryDate').value || today()) + 'T00:00:00');
             if (ds.dateShift === 'today') $('#entryDate').value = today();
             else { d.setDate(d.getDate() + Number(ds.dateShift)); $('#entryDate').value = isoDate(d); }
-            loadDay(); saveDraft();
-        } else if (ds.editInline) startEditInForm(state.dayLogs.find((l) => l.id === +ds.editInline));
-        else if (ds.edit) openEditModal(state.historyLogs.find((l) => l.id === +ds.edit));
+            updateDuration(); loadDay(); saveDraft();
+        } else if (ds.editInline) startEdit(state.dayLogs.find((l) => l.id === +ds.editInline));
+        else if (ds.edit) openEntryModal(state.historyLogs.find((l) => l.id === +ds.edit));
         else if (ds.copy) {
             const l = state.dayLogs.find((x) => x.id === +ds.copy);
             resetForm();
@@ -743,21 +778,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('#entryForm').addEventListener('submit', submitEntry);
     $('#entryForm').addEventListener('input', saveDraft);
     ['#entryStart', '#entryEnd'].forEach((s) => $(s).addEventListener('change', updateDuration));
-    $('#entryDate').addEventListener('change', loadDay);
+    $('#entryDate').addEventListener('change', () => { updateDuration(); loadDay(); });
+    // 하이라이트 애니메이션은 1회만 (폼이 팝업↔Daily Log 로 이동할 때 재생되지 않도록)
+    document.addEventListener('animationend', (e) => e.target.classList.remove('ai-filled', 'fresh'));
     $('#entryReset').addEventListener('click', () => resetForm());
-    $('#entryCancelEdit').addEventListener('click', () => resetForm());
+    $('#entryCancelEdit').addEventListener('click', cancelEdit);
+    $('#entrySubmitNext').addEventListener('click', (e) => submitEntry(e, true));
+    $('#entryDelete').addEventListener('click', () => deleteLog(state.editingId));
+    $('#entryModal').addEventListener('hidden.bs.modal', onEntryModalHidden);
+    $('#entryModal').addEventListener('shown.bs.modal', () => $('#entryContent').focus());
     $('#copyDayConfluence').addEventListener('click', () => { const d = $('#entryDate').value; copyConfluence(`date_from=${d}&date_to=${d}`); });
     $('#copyConfluence').addEventListener('click', () => copyConfluence(historyParams()));
     $('#filterForm').addEventListener('submit', (e) => { e.preventDefault(); loadHistory(); });
     $('#filterReset').addEventListener('click', () => { $('#filterForm').reset(); loadHistory(); });
-    $('#editSave').addEventListener('click', saveModal);
-    $('#editDelete').addEventListener('click', () => { modalObj.hide(); deleteLog(state.modalId); });
     $('#importPreview').addEventListener('click', () => runImport(true));
     $('#importRun').addEventListener('click', () => runImport(false));
     $('#globalAuthor').addEventListener('change', (e) => storage('k2ph.author', e.target.value.trim()));
     $('#themeToggle').addEventListener('click', () => {
         applyTheme(document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark');
-        if (!$('#view-stats').hidden) loadStats();
     });
     $('#sidebarToggle').addEventListener('click', () => {
         const c = $('#sidebar').classList.toggle('collapsed');
@@ -776,23 +814,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         const f = $('#filterForm'); f.reset(); f.q.value = e.target.value; switchView('history');
     });
     document.addEventListener('keydown', (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !$('#view-daily').hidden) submitEntry(e);
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && entryActive()) submitEntry(e);
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('#globalSearch').focus(); }
-    });
-    document.addEventListener('keydown', (e) => {
-        if (!e.altKey || e.key.toLowerCase() !== 'a') return;
-        const sc = $('#editModal').classList.contains('show') ? 'edit' : !$('#view-daily').hidden ? 'entry' : null;
-        if (sc) { e.preventDefault(); runAi(sc); }
+        if (e.altKey && e.key.toLowerCase() === 'a' && entryActive()) { e.preventDefault(); runAi(); }
+        // N: 어디서든 작업 입력 (입력칸 밖에서)
+        if (e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.target.closest('input, textarea, select, [contenteditable]')
+            && !document.querySelector('.modal.show')) { e.preventDefault(); newLog(); }
     });
     document.addEventListener('paste', (e) => {
         const files = clipboardImages(e.clipboardData);
         if (!files.length) return;
         // 엑셀/워드처럼 텍스트+이미지가 같이 오면 텍스트 붙여넣기를 우선
         if ((e.clipboardData.getData('text/plain') || '').trim()) return;
-        const scope = pasteScope(e.target);
-        if (!scope) return;
+        if (!canPasteToEntry(e.target)) return;
         e.preventDefault();
-        uploadImages(scope, files);
+        uploadImages(files);
     });
     $$('[data-drop]').forEach((zone) => {
         zone.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); zone.classList.add('drag-over'); } });
@@ -801,10 +837,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             zone.classList.remove('drag-over');
             if (!e.dataTransfer.files.length) return;
             e.preventDefault();
-            uploadImages(zone.dataset.drop, e.dataTransfer.files);
+            uploadImages(e.dataTransfer.files);
         });
     });
-    $('#editModal').addEventListener('hidden.bs.modal', () => { state.modalId = null; });
     setInterval(pollVersion, 5000);
     pollVersion();
     window.addEventListener('hashchange', () => switchView(location.hash.slice(1)));
@@ -816,5 +851,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     restoreDraft();
     renderEquipChips();
-    switchView(location.hash.slice(1) || 'daily');
+    switchView(location.hash.slice(1) || DEFAULT_VIEW);
 });

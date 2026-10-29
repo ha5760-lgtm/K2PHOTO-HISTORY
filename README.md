@@ -7,17 +7,24 @@ Confluence 페이지 표(날짜 / 작업시간 / 설비호기·공통 / 작업�
 
 ## 화면
 
-| 일일 작업 입력 | 작업 이력 (Confluence 표 대체) |
+| Work History (Confluence 표 대체) | New Work Log 팝업 (캡처 + AI 정리) |
 |---|---|
-| ![daily](docs/screenshots/1_daily_input.png) | ![history](docs/screenshots/history.png) |
-| **캡처 붙여넣기 + AI 정리** | **실시간 반영 (다른 PC 입력이 자동 표시)** |
-| ![paste](docs/screenshots/3_paste_ai.png) | ![live](docs/screenshots/4_live.png) |
-| **셋업 현황** | **AI 활용 (JSONL 미리보기)** |
-| ![stats](docs/screenshots/stats.png) | ![ai](docs/screenshots/ai.png) |
+| ![history](docs/screenshots/history.png) | ![popup](docs/screenshots/1_entry_popup.png) |
+| **Daily Log (컴팩트 입력)** | **Theme 패널 (Accent / Sidebar / Mode)** |
+| ![daily](docs/screenshots/2_daily.png) | ![theme](docs/screenshots/theme_teal.png) |
+| **Setup Dashboard** | **Dark + Rose 테마** |
+| ![stats](docs/screenshots/stats.png) | ![dark](docs/screenshots/theme_dark_rose.png) |
 
 ## 기능
 
-- **빠른 입력**: 날짜(◀ ▶ / 오늘), 작업시간(지금·+30분·+1h·+2h·+4h·주간 프리셋, 소요시간 자동 계산·야간 자정 넘김 지원),
+메뉴: **Work History**(기본 화면) · **Daily Log** · **Setup Dashboard** · **Import / Export** · **AI Assistant**
+
+- **작업 입력 팝업**: Work History 의 `작업 입력` 버튼, 우하단 `+` 버튼, 또는 `N` 키 → 팝업에서 입력. 이력의 ✏️ 수정도 같은 팝업
+  - 왼쪽에 날짜·시간·호기·분류·요약, 오른쪽에 넓은 작업내용 칸(팝업 440px+, 크기 조절 가능)
+  - `저장`(닫기) / `저장 후 계속`(연속 입력), 수정 시 `삭제`. Daily Log 화면과 같은 폼이라 임시보관·단축키 동일
+- **테마**: 상단 `Theme` → Accent 9색 + 직접 선택(#RRGGBB), Sidebar(Navy/Black/Accent/Light), Light/Dark, 기본값 복원.
+  브라우저에 저장되며, 모든 색은 CSS 변수(`--primary*`, `--sidebar-*`)로 연결 → 새 프리셋은 `static/js/theme.js` 의 `ACCENTS` 에 한 줄 추가
+- **입력 항목**: 날짜(◀ ▶ / 오늘), 작업시간(지금·+30분·+1h·+2h·+4h·주간 프리셋, 소요시간 자동 계산·야간 자정 넘김 지원),
   설비호기 칩 다중 선택 또는 `공통`, 셋업 분류(반입/설치, Hook-up/유틸, Power-on, S/W, Calibration, 공정 Qual, 회의, 기타), 작업내용, 요약
   - `Ctrl+Enter` 저장, 저장 후 다음 작업 시작시간 = 직전 종료시간
   - 요약을 비우면 작업내용 첫 줄로 자동 요약 (`자동` 태그) → 추후 LLM 요약으로 교체 예정
