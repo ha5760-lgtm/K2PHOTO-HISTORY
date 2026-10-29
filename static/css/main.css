@@ -452,3 +452,48 @@ mark { padding: 0 2px; background: rgba(255,209,102,0.5); border-radius: 2px; }
 .time-presets { align-items: center; }
 #entryWeekday { min-width: 44px; justify-content: center; font-weight: 600; }
 .entry-card .input-group .form-control { min-width: 0; }
+
+/* ── 본문 에디터 + 캡처 첨부 ── */
+.body-editor { border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-card); transition: var(--transition); }
+.body-editor:focus-within { border-color: var(--primary-light); box-shadow: 0 0 0 .2rem rgba(67,97,238,.15); }
+.body-editor.drag-over { border-color: var(--primary); border-style: dashed; background: rgba(67,97,238,0.05); }
+.body-editor textarea { border: none !important; box-shadow: none !important; background: transparent; resize: vertical; }
+.attach-strip { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 12px; }
+.attach-strip:not(:empty) { padding: 4px 12px 10px; }
+.body-editor-foot { font-size: .75rem; color: var(--text-secondary); padding: 6px 12px; border-top: 1px dashed var(--border-color); }
+.body-editor-foot kbd { font-size: .68rem; padding: 1px 4px; color: var(--text-secondary); background: var(--bg-body); border: 1px solid var(--border-color); box-shadow: none; }
+.thumb { position: relative; width: 96px; height: 72px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); background: var(--bg-body); cursor: zoom-in; flex: none; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb.uploading img { opacity: .45; filter: grayscale(.4); }
+.thumb.uploading::after { content: ''; position: absolute; inset: 0; margin: auto; width: 22px; height: 22px; border: 3px solid var(--primary); border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+.thumb.failed { border-color: var(--danger); }
+.thumb .thumb-x { position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(0,0,0,.6); color: #fff; font-size: .7rem; line-height: 1; display: none; align-items: center; justify-content: center; }
+.thumb:hover .thumb-x { display: flex; }
+.thumb .thumb-ok { position: absolute; left: 4px; bottom: 3px; font-size: .62rem; color: #fff; background: rgba(6,214,160,.9); border-radius: 4px; padding: 0 4px; }
+.thumbs-sm { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.thumbs-sm .thumb { width: 72px; height: 54px; }
+.history-table .thumbs-sm .thumb { width: 56px; height: 42px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes flash { from { background: rgba(124,58,237,.18); } to { background: transparent; } }
+.ai-filled { animation: flash 1.6s ease-out; }
+.timeline-item.fresh { animation: flash 2s ease-out; }
+.lightbox-content { background: var(--bg-card); }
+#lightboxImg { max-width: 100%; max-height: 80vh; border-radius: 6px; }
+
+/* AI 버튼 */
+.btn-ai { --ai: #7c3aed; padding: 3px 12px; font-size: .78rem; font-weight: 600; border-radius: 20px; color: #fff; border: none;
+    background: linear-gradient(135deg, #7c3aed, var(--primary)); box-shadow: 0 2px 8px rgba(124,58,237,.25); }
+.btn-ai:hover { color: #fff; filter: brightness(1.08); transform: translateY(-1px); }
+.btn-ai:disabled { opacity: .7; color: #fff; }
+.btn-ai .spinner-border { width: .8rem; height: .8rem; border-width: 2px; }
+.ai-result { margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: .78rem; background: rgba(124,58,237,.07); border: 1px solid rgba(124,58,237,.2); color: var(--text-primary); }
+.ai-result .ai-head { display: flex; align-items: center; gap: 8px; color: #7c3aed; font-weight: 600; }
+.ai-result ul { margin: 4px 0 0; padding-left: 18px; }
+[data-bs-theme="dark"] .ai-result .ai-head { color: #a78bfa; }
+
+/* 실시간 표시 */
+.live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--success); margin-right: 4px; box-shadow: 0 0 0 0 rgba(6,214,160,.6); animation: pulse 2s infinite; vertical-align: middle; }
+@keyframes pulse { 70% { box-shadow: 0 0 0 6px rgba(6,214,160,0); } 100% { box-shadow: 0 0 0 0 rgba(6,214,160,0); } }
+.live-badge { font-size: .75rem; color: var(--text-secondary); white-space: nowrap; }
+.live-badge.off .live-dot { background: var(--text-secondary); animation: none; }
+@media (max-width: 768px) { .live-badge { display: none; } }

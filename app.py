@@ -2,18 +2,23 @@
 K2 PHOTO History - 라인 셋업 일일 작업이력 관리
 Confluence 표로 관리하던 일일 작업내용을 간단 입력 → SQLite 자동 저장 → AI 활용(JSONL export)
 """
-from flask import Flask, render_template, request, jsonify, Response
+from flask import Flask, render_template, request, jsonify, Response, send_from_directory
 import sqlite3
 import os
 import csv
 import io
 import re
 import json as _json
+import uuid
 from datetime import datetime, timedelta, date
+import llm
 
 app = Flask(__name__)
-DATABASE = os.environ.get(
-    'K2PH_DB', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'k2photo_history.db'))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATABASE = os.environ.get('K2PH_DB', os.path.join(BASE_DIR, 'k2photo_history.db'))
+UPLOAD_DIR = os.environ.get('K2PH_UPLOADS', os.path.join(BASE_DIR, 'uploads'))
+IMAGE_EXTS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'}
+app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 캡처 1장 기준 넉넉히 20MB
 
 COMMON = '공통'
 
@@ -87,6 +92,16 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_logs_date ON work_logs(work_date DESC);
         CREATE INDEX IF NOT EXISTS idx_logs_equipment ON work_logs(equipment);
+        CREATE TABLE IF NOT EXISTS attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            log_id INTEGER,
+            filename TEXT NOT NULL,
+            original_name TEXT,
+            mime TEXT,
+            size INTEGER,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_attach_log ON attachments(log_id);
     ''')
     if conn.execute('SELECT COUNT(*) FROM equipment').fetchone()[0] == 0:
         conn.executemany('INSERT INTO equipment (name, vendor, category) VALUES (?, ?, ?)',
@@ -132,7 +147,50 @@ def normalize_equipment(value):
 def row_to_dict(r):
     d = dict(r)
     d['equipment_list'] = [e.strip() for e in d['equipment'].split(',')]
+    d.setdefault('attachments', [])
     return d
+
+
+def attachment_dict(a):
+    return {'id': a['id'], 'log_id': a['log_id'], 'url': f"/uploads/{a['filename']}",
+            'name': a['original_name'], 'size': a['size']}
+
+
+def attach_files(conn, rows):
+    """rows(list of dict) 에 attachments 채움."""
+    ids = [r['id'] for r in rows]
+    if not ids:
+        return rows
+    by_log = {}
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        for a in conn.execute(f"SELECT * FROM attachments WHERE log_id IN ({','.join('?' * len(chunk))}) ORDER BY id",
+                              chunk).fetchall():
+            by_log.setdefault(a['log_id'], []).append(attachment_dict(a))
+    for r in rows:
+        r['attachments'] = by_log.get(r['id'], [])
+    return rows
+
+
+def fetch_log(conn, log_id):
+    row = conn.execute('SELECT * FROM work_logs WHERE id = ?', (log_id,)).fetchone()
+    return attach_files(conn, [row_to_dict(row)])[0] if row else None
+
+
+def link_attachments(conn, log_id, ids):
+    ids = [int(i) for i in (ids or []) if str(i).isdigit()]
+    if ids:
+        conn.execute(f"UPDATE attachments SET log_id = ? WHERE id IN ({','.join('?' * len(ids))}) "
+                     "AND (log_id IS NULL OR log_id = ?)", [log_id, *ids, log_id])
+
+
+def remove_attachment_files(conn, where, params):
+    for a in conn.execute(f'SELECT filename FROM attachments WHERE {where}', params).fetchall():
+        try:
+            os.remove(os.path.join(UPLOAD_DIR, a['filename']))
+        except OSError:
+            pass
+    conn.execute(f'DELETE FROM attachments WHERE {where}', params)
 
 
 def validate_payload(data, partial=False):
@@ -199,7 +257,7 @@ def query_logs(args):
     sql += " ORDER BY work_date DESC, COALESCE(start_time, '99:99') DESC, id DESC LIMIT ?"
     params.append(min(int(args.get('limit') or 500), 5000))
     conn = get_db()
-    rows = [row_to_dict(r) for r in conn.execute(sql, params).fetchall()]
+    rows = attach_files(conn, [row_to_dict(r) for r in conn.execute(sql, params).fetchall()])
     conn.close()
     return rows
 
@@ -226,6 +284,8 @@ def api_meta():
         'authors': authors,
         'categories': [{'code': c, 'label': l, 'icon': i} for c, l, i in CATEGORIES],
         'common': COMMON,
+        'ai_engine': llm.engine_name(),
+        'ai_enabled': llm.is_enabled(),
     })
 
 
@@ -266,10 +326,11 @@ def api_logs_create():
     cur = conn.execute(
         f"INSERT INTO work_logs ({', '.join(rec)}) VALUES ({', '.join('?' * len(rec))})",
         list(rec.values()))
+    link_attachments(conn, cur.lastrowid, data.get('attachment_ids'))
     conn.commit()
-    row = conn.execute('SELECT * FROM work_logs WHERE id = ?', (cur.lastrowid,)).fetchone()
+    log = fetch_log(conn, cur.lastrowid)
     conn.close()
-    return jsonify(row_to_dict(row)), 201
+    return jsonify(log), 201
 
 
 @app.route('/api/logs/<int:log_id>', methods=['PUT'])
@@ -280,7 +341,7 @@ def api_logs_update(log_id):
     if not row:
         conn.close()
         return jsonify({'error': 'not found'}), 404
-    merged = {**dict(row), **data}
+    merged = {**dict(row), **{k: v for k, v in data.items() if k != 'attachment_ids'}}
     # 요약을 비우거나 자동요약 상태였다면 내용 기준으로 다시 자동요약
     if 'summary' not in data and row['summary_auto']:
         merged['summary'] = ''
@@ -292,21 +353,112 @@ def api_logs_update(log_id):
     rec['updated_at'] = now_iso()
     conn.execute(f"UPDATE work_logs SET {', '.join(f'{k} = ?' for k in rec)} WHERE id = ?",
                  [*rec.values(), log_id])
+    link_attachments(conn, log_id, data.get('attachment_ids'))
     conn.commit()
-    row = conn.execute('SELECT * FROM work_logs WHERE id = ?', (log_id,)).fetchone()
+    log = fetch_log(conn, log_id)
     conn.close()
-    return jsonify(row_to_dict(row))
+    return jsonify(log)
 
 
 @app.route('/api/logs/<int:log_id>', methods=['DELETE'])
 def api_logs_delete(log_id):
     conn = get_db()
     cur = conn.execute('DELETE FROM work_logs WHERE id = ?', (log_id,))
+    if cur.rowcount:
+        remove_attachment_files(conn, 'log_id = ?', [log_id])
     conn.commit()
     conn.close()
     if cur.rowcount == 0:
         return jsonify({'error': 'not found'}), 404
     return jsonify({'deleted': log_id})
+
+
+# ─── Attachments (캡처 붙여넣기) ──────────────────────
+
+@app.route('/uploads/<path:filename>')
+def uploads(filename):
+    return send_from_directory(UPLOAD_DIR, filename, max_age=86400)
+
+
+@app.route('/api/attachments', methods=['POST'])
+def api_attachment_upload():
+    """Ctrl+V 캡처 즉시 업로드. log_id 를 주면 기존 기록에 바로 연결(저장), 없으면 입력 중 임시 첨부."""
+    f = request.files.get('file')
+    if not f:
+        return jsonify({'error': '파일이 없습니다'}), 400
+    mime = f.mimetype or ''
+    ext = (f.filename.rsplit('.', 1)[-1].lower() if '.' in (f.filename or '') else mime.split('/')[-1]).replace('jpeg', 'jpg')
+    if not mime.startswith('image/') or ext not in IMAGE_EXTS | {'jpg'}:
+        return jsonify({'error': '이미지 파일만 붙여넣을 수 있습니다'}), 400
+    log_id = request.form.get('log_id', type=int)
+    conn = get_db()
+    if log_id and not conn.execute('SELECT 1 FROM work_logs WHERE id = ?', (log_id,)).fetchone():
+        conn.close()
+        return jsonify({'error': 'not found'}), 404
+    sub = datetime.now().strftime('%Y%m')
+    os.makedirs(os.path.join(UPLOAD_DIR, sub), exist_ok=True)
+    filename = f'{sub}/{uuid.uuid4().hex}.{ext}'
+    path = os.path.join(UPLOAD_DIR, filename)
+    f.save(path)
+    original = f.filename if f.filename and f.filename not in ('image.png', 'blob') else \
+        f"capture_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
+    cur = conn.execute('INSERT INTO attachments (log_id, filename, original_name, mime, size, created_at) '
+                       'VALUES (?, ?, ?, ?, ?, ?)',
+                       (log_id, filename, original, mime, os.path.getsize(path), now_iso()))
+    if log_id:
+        conn.execute('UPDATE work_logs SET updated_at = ? WHERE id = ?', (now_iso(), log_id))
+    conn.commit()
+    a = conn.execute('SELECT * FROM attachments WHERE id = ?', (cur.lastrowid,)).fetchone()
+    conn.close()
+    return jsonify(attachment_dict(a)), 201
+
+
+@app.route('/api/attachments/<int:att_id>', methods=['DELETE'])
+def api_attachment_delete(att_id):
+    conn = get_db()
+    a = conn.execute('SELECT * FROM attachments WHERE id = ?', (att_id,)).fetchone()
+    if not a:
+        conn.close()
+        return jsonify({'error': 'not found'}), 404
+    remove_attachment_files(conn, 'id = ?', [att_id])
+    if a['log_id']:
+        conn.execute('UPDATE work_logs SET updated_at = ? WHERE id = ?', (now_iso(), a['log_id']))
+    conn.commit()
+    conn.close()
+    return jsonify({'deleted': att_id})
+
+
+@app.route('/api/version')
+def api_version():
+    """실시간 갱신용: 다른 사람이 입력/수정/삭제하면 값이 바뀜 (프론트 5초 폴링)."""
+    conn = get_db()
+    r = conn.execute('SELECT COUNT(*), COALESCE(MAX(updated_at), \'\'), COALESCE(SUM(id), 0) FROM work_logs').fetchone()
+    a = conn.execute('SELECT COUNT(*), COALESCE(MAX(id), 0) FROM attachments WHERE log_id IS NOT NULL').fetchone()
+    conn.close()
+    return jsonify({'version': f'{r[0]}-{r[1]}-{r[2]}-{a[0]}-{a[1]}'})
+
+
+# ─── AI 정리 ──────────────────────────────────────────
+
+@app.route('/api/ai/organize', methods=['POST'])
+def api_ai_organize():
+    """메모 → 개조식 작업내용 / 요약 / 분류 / 호기 / 시간 자동 기입용 결과."""
+    data = request.get_json(silent=True) or {}
+    content = (data.get('content') or '').strip()
+    if not content:
+        return jsonify({'error': '정리할 작업내용을 먼저 입력하세요'}), 400
+    conn = get_db()
+    known = [r[0] for r in conn.execute('SELECT name FROM equipment WHERE is_active = 1').fetchall()]
+    conn.close()
+    result = llm.organize(content, {
+        'work_date': data.get('work_date'),
+        'equipment': data.get('equipment') or [],
+        'category': data.get('category'),
+        'known_equipment': known,
+        'categories': [(c, l) for c, l, _ in CATEGORIES],
+        'common': COMMON,
+    })
+    return jsonify(result)
 
 
 # ─── Stats ────────────────────────────────────────────
@@ -392,6 +544,7 @@ def api_export_jsonl():
             'category': CATEGORY_LABEL.get(r['category'], r['category']),
             'author': r['author'],
             'summary': r['summary'],
+            'images': [a['url'] for a in r['attachments']],
             'text': f"[{r['work_date']}{t}] [{r['equipment']}] "
                     f"[{CATEGORY_LABEL.get(r['category'], r['category'])}] {r['content']}",
         }, ensure_ascii=False))

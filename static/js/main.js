@@ -10,6 +10,9 @@ const state = {
     dayLogs: [],
     historyLogs: [],
     charts: {},
+    attachments: { entry: [], edit: [] },   // 캡처 첨부 (scope 별)
+    aiUndo: {},
+    version: null,
 };
 const COMMON = window.COMMON || '공통';
 const DRAFT_KEY = 'k2ph.draft';
@@ -107,6 +110,7 @@ function switchView(view) {
 // ─── Meta ─────────────────────────────────────────────
 async function loadMeta() {
     state.meta = await api('/api/meta');
+    $('#aiEngine').textContent = state.meta.ai_engine || '';
     renderEquipChips();
     const catOpts = state.meta.categories.map((c) => `<option value="${c.code}">${esc(c.label)}</option>`).join('');
     $('#filterCategory').innerHTML = `<option value="">전체</option>${catOpts}`;
@@ -161,13 +165,15 @@ function formPayload() {
         content: $('#entryContent').value,
         summary: $('#entrySummary').value,
         author: $('#globalAuthor').value,
+        attachment_ids: state.attachments.entry.filter((a) => a.id).map((a) => a.id),
     };
 }
 
 function saveDraft() {
     if (state.editingId) return;
     const p = formPayload();
-    storage(DRAFT_KEY, JSON.stringify({ ...p, author: undefined }));
+    const attachments = state.attachments.entry.filter((a) => a.id).map(({ id, url, name }) => ({ id, url, name }));
+    storage(DRAFT_KEY, JSON.stringify({ ...p, author: undefined, attachment_ids: undefined, attachments }));
 }
 
 function restoreDraft() {
@@ -181,6 +187,8 @@ function restoreDraft() {
     $('#entrySummary').value = d.summary || '';
     state.selectedEquip = new Set(d.equipment || []);
     if (d.category) setCategory(d.category);
+    state.attachments.entry = (d.attachments || []).map((a) => ({ ...a, key: `a${a.id}`, status: 'done' }));
+    renderAttachments('entry');
     updateDuration();
 }
 
@@ -192,6 +200,9 @@ function resetForm(keepDate = true) {
     state.editingId = null;
     $('#entrySubmit').innerHTML = '<i class="bi bi-check-lg"></i> 저장';
     $('#entryCancelEdit').hidden = true;
+    state.attachments.entry = [];
+    renderAttachments('entry');
+    $('#entryAiResult').hidden = true;
     renderEquipChips();
     updateDuration();
     storage(DRAFT_KEY, null);
@@ -234,6 +245,8 @@ function startEditInForm(log) {
     $('#entrySummary').value = log.summary_auto ? '' : log.summary || '';
     state.selectedEquip = new Set(log.equipment_list);
     setCategory(log.category);
+    state.attachments.entry = log.attachments.map((a) => ({ ...a, key: `a${a.id}`, status: 'done' }));
+    renderAttachments('entry');
     renderEquipChips();
     updateDuration();
     $('#entrySubmit').innerHTML = '<i class="bi bi-check-lg"></i> 수정 저장';
@@ -243,10 +256,17 @@ function startEditInForm(log) {
 }
 
 // ─── Daily view ───────────────────────────────────────
-async function loadDay() {
+async function loadDay(markFresh = false) {
     const d = $('#entryDate').value || today();
+    const prev = new Map(state.dayLogs.map((l) => [l.id, l.updated_at]));
     state.dayLogs = await api(`/api/logs?date_from=${d}&date_to=${d}`);
+    state.freshIds = markFresh ? new Set(state.dayLogs.filter((l) => prev.get(l.id) !== l.updated_at).map((l) => l.id)) : new Set();
     renderDay();
+}
+
+function thumbsHtml(list) {
+    if (!list || !list.length) return '';
+    return `<div class="thumbs-sm">${list.map((a) => `<div class="thumb" data-lightbox="${esc(a.url)}" data-name="${esc(a.name || '')}"><img src="${esc(a.url)}" alt="" loading="lazy"></div>`).join('')}</div>`;
 }
 
 function renderDay() {
@@ -264,12 +284,13 @@ function renderDay() {
     $('#dayTimeline').innerHTML = logs.map((l) => {
         const c = catOf(l.category);
         const body = l.summary_auto ? l.content.split('\n').slice(1).join('\n').trim() : l.content;
-        return `<div class="timeline-item ${state.editingId === l.id ? 'editing' : ''}">
+        return `<div class="timeline-item ${state.editingId === l.id ? 'editing' : ''} ${state.freshIds && state.freshIds.has(l.id) ? 'fresh' : ''}">
             <div class="timeline-time">${l.start_time ? `${l.start_time}~${l.end_time || ''}` : '<span class="text-muted">시간 미입력</span>'}<small>${fmtDur(l.duration_min)}</small></div>
             <div>
                 <div class="mb-1">${eqBadges(l.equipment_list)} <span class="cat-badge"><i class="bi ${c.icon}"></i>${esc(c.label)}</span></div>
                 <div class="timeline-summary">${esc(l.summary)}${l.summary_auto ? '<span class="auto-tag">자동</span>' : ''}</div>
                 ${body ? `<div class="timeline-content">${esc(body)}</div>` : ''}
+                ${thumbsHtml(l.attachments)}
             </div>
             <div class="timeline-actions">
                 <button class="btn btn-sm btn-light" data-edit-inline="${l.id}" title="수정"><i class="bi bi-pencil"></i></button>
@@ -317,7 +338,7 @@ async function loadHistory() {
             <td class="font-mono">${l.start_time ? `${l.start_time}~${l.end_time || ''}` : '-'}<br><small class="text-muted">${fmtDur(l.duration_min)}</small></td>
             <td>${eqBadges(l.equipment_list)}</td>
             <td><span class="cat-badge"><i class="bi ${c.icon}"></i>${esc(c.label)}</span></td>
-            <td class="content-cell">${highlight(l.content, q)}</td>
+            <td class="content-cell">${highlight(l.content, q)}${thumbsHtml(l.attachments)}</td>
             <td>${highlight(l.summary, q)}${l.summary_auto ? '<span class="auto-tag">자동</span>' : ''}</td>
             <td class="small">${esc(l.author || '')}</td>
             <td class="row-actions"><button class="btn btn-sm btn-light" data-edit="${l.id}"><i class="bi bi-pencil"></i></button></td>
@@ -354,6 +375,9 @@ function openEditModal(log) {
     $('#editContent').value = log.content;
     $('#editSummary').value = log.summary_auto ? '' : log.summary || '';
     $('#editSummary').placeholder = log.summary_auto ? `자동 요약: ${log.summary}` : '';
+    state.attachments.edit = log.attachments.map((a) => ({ ...a, key: `a${a.id}`, status: 'done' }));
+    renderAttachments('edit');
+    $('#editAiResult').hidden = true;
     modalObj = modalObj || new bootstrap.Modal('#editModal');
     modalObj.show();
 }
@@ -374,6 +398,187 @@ async function saveModal() {
         toast('수정되었습니다');
         refreshCurrent();
     } catch (err) { toast(err.message, 'danger'); }
+}
+
+// ─── 캡처 붙여넣기 (Ctrl+V → 즉시 서버 저장) ─────────
+let attSeq = 0;
+// entry 폼에서 기존 기록 수정 중이거나 수정 모달이면 해당 기록에 바로 연결 저장
+const targetLogId = (scope) => (scope === 'edit' ? state.modalId : state.editingId);
+
+function renderAttachments(scope) {
+    const el = $(scope === 'edit' ? '#editAttachments' : '#entryAttachments');
+    el.innerHTML = state.attachments[scope].map((a) => `
+        <div class="thumb ${a.status === 'uploading' ? 'uploading' : ''} ${a.status === 'failed' ? 'failed' : ''}" data-lightbox="${esc(a.url || a.localUrl)}" data-name="${esc(a.name || '')}" title="${esc(a.name || '')}">
+            <img src="${esc(a.localUrl || a.url)}" alt="">
+            ${a.status === 'done' ? '<span class="thumb-ok"><i class="bi bi-cloud-check"></i> 저장</span>' : ''}
+            <button type="button" class="thumb-x" data-remove-att="${scope}:${a.key}" title="삭제"><i class="bi bi-x-lg"></i></button>
+        </div>`).join('');
+}
+
+function refreshLinked() {
+    if (!$('#view-history').hidden) loadHistory(); else loadDay();
+}
+
+async function uploadImages(scope, files) {
+    const images = [...files].filter((f) => f.type.startsWith('image/'));
+    if (!images.length) return;
+    await Promise.all(images.map(async (file) => {
+        const item = { key: `u${++attSeq}`, name: file.name, status: 'uploading', localUrl: URL.createObjectURL(file) };
+        state.attachments[scope].push(item);
+        renderAttachments(scope);
+        const fd = new FormData();
+        fd.append('file', file, file.name && file.name !== 'image.png' ? file.name : `capture.${(file.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`);
+        const logId = targetLogId(scope);
+        if (logId) fd.append('log_id', logId);
+        setIndicator('saving', '캡처 업로드 중…');
+        try {
+            const res = await fetch('/api/attachments', { method: 'POST', body: fd });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+            Object.assign(item, data, { status: 'done' });
+            setIndicator('', `캡처 저장됨 ${new Date().toTimeString().slice(0, 5)}`);
+        } catch (err) {
+            item.status = 'failed';
+            setIndicator('error', '업로드 실패');
+            toast(`캡처 업로드 실패: ${err.message}`, 'danger');
+        }
+        renderAttachments(scope);
+    }));
+    if (scope === 'entry') saveDraft();
+    if (targetLogId(scope)) refreshLinked();
+    toast(targetLogId(scope) ? '캡처가 기록에 바로 저장되었습니다' : '캡처가 서버에 저장되었습니다 (작업 저장 시 함께 연결)');
+}
+
+async function removeAttachment(scope, key) {
+    const list = state.attachments[scope];
+    const item = list.find((a) => a.key === key);
+    if (!item) return;
+    if (item.id) {
+        try { await api(`/api/attachments/${item.id}`, { method: 'DELETE' }); }
+        catch (err) { toast(err.message, 'danger'); return; }
+    }
+    if (item.localUrl) URL.revokeObjectURL(item.localUrl);
+    state.attachments[scope] = list.filter((a) => a !== item);
+    renderAttachments(scope);
+    if (scope === 'entry') saveDraft();
+    if (item.id && item.log_id) refreshLinked();
+}
+
+function pasteScope(target) {
+    if ($('#editModal').classList.contains('show')) return 'edit';
+    if (!$('#view-daily').hidden) {
+        // 다른 입력칸(검색/작성자 등)에서 붙여넣기는 무시, 폼 내부나 빈 곳이면 본문 첨부
+        if (target.closest('#entryForm') || !target.closest('input, textarea, select')) return 'entry';
+    }
+    return null;
+}
+
+function clipboardImages(dt) {
+    return [...(dt.items || [])].filter((i) => i.kind === 'file' && i.type.startsWith('image/')).map((i) => i.getAsFile()).filter(Boolean);
+}
+
+// ─── AI 정리 ──────────────────────────────────────────
+const AI_FIELDS = {
+    entry: {
+        get: () => ({ content: $('#entryContent').value, summary: $('#entrySummary').value, category: state.category,
+            equipment: [...state.selectedEquip], start_time: $('#entryStart').value, end_time: $('#entryEnd').value,
+            work_date: $('#entryDate').value }),
+        set: (v) => {
+            $('#entryContent').value = v.content; $('#entrySummary').value = v.summary;
+            $('#entryStart').value = v.start_time || ''; $('#entryEnd').value = v.end_time || '';
+            state.selectedEquip = new Set(v.equipment); setCategory(v.category); renderEquipChips(); updateDuration(); saveDraft();
+        },
+        flash: ['#entryContent', '#entrySummary', '#entryStart', '#entryEnd', '#equipChips', '#categoryGrid'],
+        box: '#entryAiResult',
+    },
+    edit: {
+        get: () => ({ content: $('#editContent').value, summary: $('#editSummary').value, category: $('#editCategory').value,
+            equipment: $('#editEquip').value.split(/[,\s]+/).filter(Boolean), start_time: $('#editStart').value,
+            end_time: $('#editEnd').value, work_date: $('#editDate').value }),
+        set: (v) => {
+            $('#editContent').value = v.content; $('#editSummary').value = v.summary; $('#editCategory').value = v.category;
+            $('#editEquip').value = v.equipment.join(', '); $('#editStart').value = v.start_time || ''; $('#editEnd').value = v.end_time || '';
+        },
+        flash: ['#editContent', '#editSummary', '#editCategory', '#editEquip', '#editStart', '#editEnd'],
+        box: '#editAiResult',
+    },
+};
+
+async function runAi(scope) {
+    const f = AI_FIELDS[scope];
+    const cur = f.get();
+    if (!cur.content.trim()) { toast('정리할 메모를 작업내용에 먼저 적어주세요', 'danger'); return; }
+    const btn = $(`[data-ai="${scope}"]`);
+    const label = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border"></span> 정리 중…';
+    try {
+        const r = await api('/api/ai/organize', { method: 'POST', body: JSON.stringify(cur) });
+        state.aiUndo[scope] = cur;
+        // 시간은 비어 있을 때만, 호기는 기존 선택 + AI 인식 결과 합집합, 분류는 AI 가 특정했을 때만 덮어씀
+        const found = r.equipment.filter((e) => e !== COMMON);
+        let equipment = cur.equipment.filter((e) => e !== COMMON);
+        equipment = [...new Set([...equipment, ...found])];
+        if (!equipment.length) equipment = cur.equipment.length || r.equipment.includes(COMMON) ? [COMMON] : [];
+        const next = {
+            ...cur,
+            content: r.content,
+            summary: r.summary,
+            category: r.category !== 'ETC' ? r.category : cur.category,
+            equipment,
+            start_time: cur.start_time || r.start_time || '',
+            end_time: cur.end_time || r.end_time || '',
+        };
+        f.set(next);
+        f.flash.forEach((sel) => { const el = $(sel); el.classList.remove('ai-filled'); void el.offsetWidth; el.classList.add('ai-filled'); });
+        const list = (title, items) => (items.length ? `<div class="mt-1"><b>${title}</b><ul>${items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul></div>` : '');
+        const box = $(f.box);
+        box.innerHTML = `<div class="ai-head"><i class="bi bi-stars"></i> AI 정리 완료
+                <span class="text-muted fw-normal">· ${r.engine === 'llm' ? 'LLM' : '규칙 기반'}${r.warning ? ` (${esc(r.warning)})` : ''}</span>
+                <button type="button" class="btn btn-sm btn-link ms-auto p-0" data-ai-undo="${scope}"><i class="bi bi-arrow-counterclockwise"></i> 되돌리기</button></div>
+            ${list('이슈', r.issues)}${list('후속 조치', r.next_actions)}
+            <div class="text-muted mt-1">내용을 확인한 뒤 저장하세요.</div>`;
+        box.hidden = false;
+    } catch (err) {
+        toast(`AI 정리 실패: ${err.message}`, 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = label;
+    }
+}
+
+function undoAi(scope) {
+    const prev = state.aiUndo[scope];
+    if (!prev) return;
+    AI_FIELDS[scope].set(prev);
+    $(AI_FIELDS[scope].box).hidden = true;
+    toast('AI 정리 전으로 되돌렸습니다');
+}
+
+// ─── 실시간 갱신 (5초 폴링) ───────────────────────────
+async function pollVersion() {
+    if (document.hidden) return;
+    try {
+        const { version } = await api('/api/version');
+        $('#liveBadge').classList.remove('off');
+        if (state.version && version !== state.version) {
+            if (!$('#view-daily').hidden) loadDay(true);
+            else if (!$('#view-history').hidden) loadHistory();
+            else if (!$('#view-stats').hidden) loadStats();
+        }
+        state.version = version;
+    } catch (e) {
+        $('#liveBadge').classList.add('off');
+    }
+}
+
+let lightboxObj;
+function openLightbox(url, name) {
+    $('#lightboxImg').src = url;
+    $('#lightboxOpen').href = url;
+    $('#lightboxName').textContent = name || '';
+    lightboxObj = lightboxObj || new bootstrap.Modal('#lightbox');
+    lightboxObj.show();
 }
 
 // ─── Stats view ───────────────────────────────────────
@@ -490,6 +695,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 이벤트 위임
     document.addEventListener('click', (e) => {
+        const extra = e.target.closest('[data-remove-att],[data-lightbox],[data-ai],[data-ai-undo]');
+        if (extra) {
+            const xs = extra.dataset;
+            if (xs.removeAtt) { e.stopPropagation(); const [sc, key] = xs.removeAtt.split(':'); removeAttachment(sc, key); }
+            else if (xs.lightbox) openLightbox(xs.lightbox, xs.name);
+            else if (xs.ai) runAi(xs.ai);
+            else if (xs.aiUndo) undoAi(xs.aiUndo);
+            return;
+        }
         const t = e.target.closest('[data-view],[data-equip],[data-category],[data-dur],[data-time-preset],[data-date-shift],[data-edit],[data-edit-inline],[data-copy],[data-delete],[data-range],[data-goto-equip],[data-export]');
         if (!t) return;
         const ds = t.dataset;
@@ -565,6 +779,34 @@ document.addEventListener('DOMContentLoaded', async () => {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !$('#view-daily').hidden) submitEntry(e);
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('#globalSearch').focus(); }
     });
+    document.addEventListener('keydown', (e) => {
+        if (!e.altKey || e.key.toLowerCase() !== 'a') return;
+        const sc = $('#editModal').classList.contains('show') ? 'edit' : !$('#view-daily').hidden ? 'entry' : null;
+        if (sc) { e.preventDefault(); runAi(sc); }
+    });
+    document.addEventListener('paste', (e) => {
+        const files = clipboardImages(e.clipboardData);
+        if (!files.length) return;
+        // 엑셀/워드처럼 텍스트+이미지가 같이 오면 텍스트 붙여넣기를 우선
+        if ((e.clipboardData.getData('text/plain') || '').trim()) return;
+        const scope = pasteScope(e.target);
+        if (!scope) return;
+        e.preventDefault();
+        uploadImages(scope, files);
+    });
+    $$('[data-drop]').forEach((zone) => {
+        zone.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); zone.classList.add('drag-over'); } });
+        zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+        zone.addEventListener('drop', (e) => {
+            zone.classList.remove('drag-over');
+            if (!e.dataTransfer.files.length) return;
+            e.preventDefault();
+            uploadImages(zone.dataset.drop, e.dataTransfer.files);
+        });
+    });
+    $('#editModal').addEventListener('hidden.bs.modal', () => { state.modalId = null; });
+    setInterval(pollVersion, 5000);
+    pollVersion();
     window.addEventListener('hashchange', () => switchView(location.hash.slice(1)));
 
     try {

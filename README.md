@@ -10,6 +10,8 @@ Confluence 페이지 표(날짜 / 작업시간 / 설비호기·공통 / 작업�
 | 일일 작업 입력 | 작업 이력 (Confluence 표 대체) |
 |---|---|
 | ![daily](docs/screenshots/1_daily_input.png) | ![history](docs/screenshots/history.png) |
+| **캡처 붙여넣기 + AI 정리** | **실시간 반영 (다른 PC 입력이 자동 표시)** |
+| ![paste](docs/screenshots/3_paste_ai.png) | ![live](docs/screenshots/4_live.png) |
 | **셋업 현황** | **AI 활용 (JSONL 미리보기)** |
 | ![stats](docs/screenshots/stats.png) | ![ai](docs/screenshots/ai.png) |
 
@@ -20,6 +22,14 @@ Confluence 페이지 표(날짜 / 작업시간 / 설비호기·공통 / 작업�
   - `Ctrl+Enter` 저장, 저장 후 다음 작업 시작시간 = 직전 종료시간
   - 요약을 비우면 작업내용 첫 줄로 자동 요약 (`자동` 태그) → 추후 LLM 요약으로 교체 예정
   - 입력 중 내용은 브라우저에 임시 보관 (새로고침해도 유지)
+- **캡처 붙여넣기**: 작업내용 칸에서 `Ctrl+V` (또는 드래그&드롭) → 즉시 서버 업로드, 썸네일 바로 표시
+  - 새 작업 입력 중: 서버에 먼저 저장되고, 작업 저장 시 그 기록에 연결
+  - 기존 기록 수정 중(폼/수정 모달): 해당 기록에 바로 저장 → 목록에 즉시 반영
+  - 썸네일 클릭 시 크게 보기, `×` 로 삭제. 파일은 `uploads/YYYYMM/` 에 저장
+  - 엑셀처럼 텍스트+이미지가 함께 복사된 경우는 텍스트 붙여넣기 우선
+- **AI 정리** (`✨ AI 정리` 버튼 또는 `Alt+A`): 대충 적은 메모 → 개조식 작업내용(후속 조치는 `▶ 후속:`), 40자 요약,
+  분류, 설비호기, 작업시간을 자동 기입. 이슈/후속 조치 목록 표시, `되돌리기` 지원. 저장 전 확인용
+- **실시간 반영**: 5초마다 변경 여부를 확인해 다른 사람이 입력/수정한 기록을 자동으로 보여줌 (새 항목 하이라이트)
 - **작업 이력**: 날짜별 묶음 표, 기간/호기/분류/검색어 필터, 검색어 하이라이트, 수정·삭제
 - **셋업 현황**: 누적/이번 주 건수·시간, 최근 14일 추이, 분류별 비중, 호기별 작업량 (클릭 시 이력 필터)
 - **가져오기**: Confluence 표를 복사(탭 구분)해서 붙여넣으면 미리보기 후 일괄 등록 (병합된 날짜 셀은 윗 행 날짜 상속)
@@ -36,6 +46,18 @@ python app.py         # http://localhost:5070
 
 - DB: `k2photo_history.db` (SQLite, 환경변수 `K2PH_DB` 로 경로 변경)
 - 포트: 환경변수 `PORT` (기본 5070)
+- 캡처 저장 경로: 환경변수 `K2PH_UPLOADS` (기본 `./uploads`)
+
+### AI 정리 (LLM) 설정
+
+photo-ai-bot / equip-history 와 같은 OpenAI 호환 설정을 사용합니다. 설정이 없으면 **규칙 기반**(호기명·시간·분류 키워드 인식)으로 동작하고,
+LLM 호출이 실패해도 규칙 기반으로 자동 폴백합니다.
+
+```bash
+export LLM_API_URL=https://api.x.ai/v1      # 사내 게이트웨이 주소로 교체 가능 (/chat/completions 는 자동 부착)
+export LLM_API_KEY=<key>                    # 키가 필요 없는 사내 서버면 생략
+export LLM_MODEL=grok-4-fast-non-reasoning  # 선택
+```
 - Bootstrap / Bootstrap Icons / Chart.js 는 `static/vendor/` 에 포함 → 사내망(CDN 차단)에서도 동작
 
 ## API
@@ -48,12 +70,16 @@ python app.py         # http://localhost:5070
 | POST | `/api/logs` | 등록 |
 | PUT / DELETE | `/api/logs/<id>` | 수정 / 삭제 |
 | GET | `/api/stats` | 현황 집계 |
+| POST | `/api/attachments` | 캡처 업로드 (multipart `file`, 선택 `log_id`) |
+| DELETE | `/api/attachments/<id>` | 캡처 삭제 |
+| POST | `/api/ai/organize` | AI 정리 (`content`, `equipment`, `category`, `work_date`) |
+| GET | `/api/version` | 실시간 갱신용 변경 감지 |
 | POST | `/api/import` | Confluence 표 붙여넣기 가져오기 (`dry_run` 지원) |
 | GET | `/api/export.csv`, `/api/export.jsonl`, `/api/export/confluence` | 내보내기 (조회와 같은 필터) |
 
 ## AI 활용 계획
 
-1. `auto_summary()` 를 LLM 요약으로 교체 (photo-ai-bot / equip-history 의 LLM 클라이언트 재사용)
+1. ~~AI 정리 버튼~~ (완료, `llm.py`) → 캡처 이미지까지 읽는 비전 모델 연동
 2. 기간·호기별 주간 셋업 리포트 자동 생성
 3. `/api/export.jsonl` 의 `text` 필드를 photo-ai-bot RAG 인덱스 소스로 연결
 

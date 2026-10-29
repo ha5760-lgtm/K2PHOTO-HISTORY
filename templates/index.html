@@ -42,6 +42,7 @@
             </div>
         </div>
         <div class="topbar-right">
+            <span class="live-badge" id="liveBadge" title="5초마다 다른 사람의 입력을 자동 반영"><span class="live-dot"></span>실시간</span>
             <span class="save-indicator" id="saveIndicator"><i class="bi bi-cloud-check"></i> <span>DB 연결됨</span></span>
             <div class="author-badge">
                 <i class="bi bi-person-circle"></i>
@@ -106,9 +107,17 @@
                                     </div>
                                 </div>
                                 <div class="col-12">
-                                    <label class="form-label">작업내용</label>
-                                    <textarea class="form-control" name="content" id="entryContent" rows="5" required
-                                        placeholder="- Wafer stage leveling 확인, Z offset 재조정&#10;- 벤더(ASML) FSE 2명 지원, 내일 Recipe download 예정"></textarea>
+                                    <label class="form-label d-flex justify-content-between align-items-end">
+                                        <span>작업내용</span>
+                                        <button type="button" class="btn btn-ai" data-ai="entry" title="메모를 정리해서 작업내용·요약·분류·호기·시간을 자동 기입 (Alt+A)"><i class="bi bi-stars"></i> AI 정리</button>
+                                    </label>
+                                    <div class="body-editor" data-drop="entry">
+                                        <textarea class="form-control" name="content" id="entryContent" rows="5" required
+                                            placeholder="대충 적어도 됩니다. 예) paa7302 13:00-17:30 stage leveling 확인 z offset 재조정 내일 재측정&#10;캡처는 여기서 Ctrl+V"></textarea>
+                                        <div class="attach-strip" id="entryAttachments"></div>
+                                        <div class="body-editor-foot"><i class="bi bi-clipboard-plus"></i> 캡처 <kbd>Ctrl</kbd>+<kbd>V</kbd> 붙여넣기 · 드래그&amp;드롭 → 즉시 서버 저장</div>
+                                    </div>
+                                    <div class="ai-result" id="entryAiResult" hidden></div>
                                 </div>
                                 <div class="col-12">
                                     <label class="form-label">요약 <small class="text-muted">(비우면 첫 줄로 자동 요약)</small></label>
@@ -249,7 +258,8 @@
                         <ul class="ai-roadmap">
                             <li class="done"><i class="bi bi-check-circle-fill"></i><div><b>구조화 저장</b><br><small>날짜·시간·호기·분류·내용·요약을 필드 단위로 SQLite에 저장</small></div></li>
                             <li class="done"><i class="bi bi-check-circle-fill"></i><div><b>JSONL Export</b><br><small>레코드당 1줄, <code>text</code> 필드에 검색용 문장 생성 → RAG 인덱싱 바로 투입</small></div></li>
-                            <li><i class="bi bi-circle"></i><div><b>LLM 자동 요약</b><br><small>요약 미입력 시 현재는 첫 줄 사용 → LLM 요약으로 교체 (<code>auto_summary()</code>)</small></div></li>
+                            <li class="done"><i class="bi bi-check-circle-fill"></i><div><b>AI 정리 버튼</b> <span class="badge text-bg-light" id="aiEngine"></span><br><small>메모 → 개조식 작업내용 · 요약 · 분류 · 호기 · 작업시간 자동 기입. <code>LLM_API_URL</code> 미설정 시 규칙 기반으로 동작</small></div></li>
+                            <li class="done"><i class="bi bi-check-circle-fill"></i><div><b>캡처 첨부</b><br><small>Ctrl+V 즉시 업로드, JSONL 의 <code>images</code> 필드로 함께 내보냄</small></div></li>
                             <li><i class="bi bi-circle"></i><div><b>주간 리포트 생성</b><br><small>기간/호기 필터 결과를 묶어 주간 셋업 보고서 초안 작성</small></div></li>
                             <li><i class="bi bi-circle"></i><div><b>photo-ai-bot 연동</b><br><small>"PAA7302 leveling 이슈 이력?" 같은 질문에 이 DB를 검색 소스로 사용</small></div></li>
                         </ul>
@@ -280,7 +290,16 @@
                 <div class="col-md-4"><label class="form-label">종료</label><input type="time" class="form-control" id="editEnd"></div>
                 <div class="col-md-8"><label class="form-label">설비호기 <small class="text-muted">(콤마 구분, 공통)</small></label><input type="text" class="form-control" id="editEquip"></div>
                 <div class="col-md-4"><label class="form-label">분류</label><select class="form-select" id="editCategory"></select></div>
-                <div class="col-12"><label class="form-label">작업내용</label><textarea class="form-control" id="editContent" rows="5"></textarea></div>
+                <div class="col-12">
+                    <label class="form-label d-flex justify-content-between align-items-end"><span>작업내용</span>
+                        <button type="button" class="btn btn-ai" data-ai="edit"><i class="bi bi-stars"></i> AI 정리</button></label>
+                    <div class="body-editor" data-drop="edit">
+                        <textarea class="form-control" id="editContent" rows="5"></textarea>
+                        <div class="attach-strip" id="editAttachments"></div>
+                        <div class="body-editor-foot"><i class="bi bi-clipboard-plus"></i> 캡처 <kbd>Ctrl</kbd>+<kbd>V</kbd> → 이 기록에 바로 저장됩니다</div>
+                    </div>
+                    <div class="ai-result" id="editAiResult" hidden></div>
+                </div>
                 <div class="col-12"><label class="form-label">요약</label><input type="text" class="form-control" id="editSummary"></div>
             </div>
         </div>
@@ -289,6 +308,16 @@
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
             <button type="button" class="btn btn-primary" id="editSave"><i class="bi bi-check-lg"></i> 저장</button>
         </div>
+    </div></div>
+</div>
+
+<!-- Lightbox -->
+<div class="modal fade" id="lightbox" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-centered"><div class="modal-content lightbox-content">
+        <div class="modal-header py-2"><small class="text-muted" id="lightboxName"></small>
+            <a class="btn btn-sm btn-light ms-auto me-2" id="lightboxOpen" target="_blank"><i class="bi bi-box-arrow-up-right"></i> 원본</a>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body text-center p-2"><img id="lightboxImg" alt=""></div>
     </div></div>
 </div>
 
