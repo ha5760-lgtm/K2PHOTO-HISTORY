@@ -4,7 +4,7 @@
 const state = {
     meta: { equipment: [], categories: [], authors: [] },
     selectedEquip: new Set(),
-    category: 'ETC',
+    category: 'SIMPLE',
     editingId: null,       // 입력 폼으로 수정 중인 기록 id (Daily Log 인라인 또는 팝업)
     dayLogs: [],
     historyLogs: [],
@@ -27,7 +27,9 @@ const weekday = (s) => WEEKDAYS[new Date(s + 'T00:00:00').getDay()];
 const fmtHours = (min) => (min ? `${Math.round((min / 60) * 10) / 10}h` : '0h');
 const fmtDur = (min) => (min == null ? '' : min >= 60 ? `${Math.floor(min / 60)}h ${min % 60 ? (min % 60) + 'm' : ''}`.trim() : `${min}m`);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const catOf = (code) => state.meta.categories.find((c) => c.code === code) || { label: code, icon: 'bi-tag' };
+const catOf = (code) => state.meta.categories.find((c) => c.code === code) || { label: code, icon: 'bi-tag', color: '#64748b' };
+const defaultCategory = () => state.meta.default_category || 'SIMPLE';
+const catBadge = (code) => { const c = catOf(code); return `<span class="cat-badge" style="--cat:${c.color}"><i class="bi ${c.icon}"></i>${esc(c.label)}</span>`; };
 const equipInfo = (name) => state.meta.equipment.find((e) => e.name === name);
 
 function storage(key, value) {
@@ -116,7 +118,7 @@ async function loadMeta() {
     const catOpts = state.meta.categories.map((c) => `<option value="${c.code}">${esc(c.label)}</option>`).join('');
     $('#filterCategory').innerHTML = `<option value="">전체</option>${catOpts}`;
     $('#importCategory').innerHTML = catOpts;
-    $('#importCategory').value = 'ETC';
+    $('#importCategory').value = defaultCategory();
     $('#filterEquip').innerHTML = `<option value="">전체</option><option value="${COMMON}">${COMMON}</option>` +
         state.meta.equipment.map((e) => `<option>${esc(e.name)}</option>`).join('');
 }
@@ -202,7 +204,7 @@ function clearForm(keepDate = true) {
     $('#entryForm').reset();
     $('#entryDate').value = keepDate && date ? date : today();
     state.selectedEquip = new Set();
-    setCategory('ETC', false);  // 수정 취소 시 임시보관을 덮어쓰지 않도록 저장하지 않음
+    setCategory(defaultCategory(), false);  // 수정 취소 시 임시보관을 덮어쓰지 않도록 저장하지 않음
     state.attachments = [];
     renderAttachments();
     renderEquipChips();
@@ -332,12 +334,11 @@ function renderDay() {
         return;
     }
     $('#dayTimeline').innerHTML = logs.map((l) => {
-        const c = catOf(l.category);
         const body = l.summary_auto ? l.content.split('\n').slice(1).join('\n').trim() : l.content;
         return `<div class="timeline-item ${state.editingId === l.id ? 'editing' : ''} ${state.freshIds && state.freshIds.has(l.id) ? 'fresh' : ''}">
             <div class="timeline-time">${l.start_time ? `${l.start_time}~${l.end_time || ''}` : '<span class="text-muted">시간 미입력</span>'}<small>${fmtDur(l.duration_min)}</small></div>
             <div>
-                <div class="mb-1">${eqBadges(l.equipment_list)} <span class="cat-badge"><i class="bi ${c.icon}"></i>${esc(c.label)}</span></div>
+                <div class="mb-1">${eqBadges(l.equipment_list)} ${catBadge(l.category)}</div>
                 <div class="timeline-summary">${esc(l.summary)}${l.summary_auto ? '<span class="auto-tag">자동</span>' : ''}</div>
                 ${body ? `<div class="timeline-content">${esc(body)}</div>` : ''}
                 ${thumbsHtml(l.attachments)}
@@ -385,12 +386,11 @@ async function loadHistory() {
     const rows = state.historyLogs.map((l) => {
         const first = l.work_date !== lastDate;
         lastDate = l.work_date;
-        const c = catOf(l.category);
         return `<tr class="${first ? 'date-first' : ''}">
             <td class="date-cell">${first ? `${l.work_date.slice(5).replace('-', '/')}<small>${l.work_date.slice(0, 4)} (${weekday(l.work_date)})</small>` : ''}</td>
             <td class="font-mono">${l.start_time ? `${l.start_time}~${l.end_time || ''}` : '-'}<br><small class="text-muted">${fmtDur(l.duration_min)}</small></td>
             <td>${eqBadges(l.equipment_list)}</td>
-            <td><span class="cat-badge"><i class="bi ${c.icon}"></i>${esc(c.label)}</span></td>
+            <td>${catBadge(l.category)}</td>
             <td class="content-cell">${highlight(l.content, q)}${thumbsHtml(l.attachments)}</td>
             <td>${highlight(l.summary, q)}${l.summary_auto ? '<span class="auto-tag">자동</span>' : ''}</td>
             <td class="small">${esc(l.author || '')}</td>
@@ -520,7 +520,7 @@ async function runAi() {
             ...cur,
             content: r.content,
             summary: r.summary,
-            category: r.category !== 'ETC' ? r.category : cur.category,
+            category: r.category !== defaultCategory() ? r.category : cur.category,
             equipment,
             start_time: cur.start_time || r.start_time || '',
             end_time: cur.end_time || r.end_time || '',
@@ -615,8 +615,8 @@ async function loadStats() {
     const max = Math.max(1, ...s.by_category.map((c) => c.count));
     $('#categoryBars').innerHTML = s.by_category.map((c) => {
         const cat = catOf(c.code);
-        return `<div class="cat-bar"><div class="cat-bar-head"><span><i class="bi ${cat.icon} me-1"></i>${esc(cat.label)}</span><span class="text-muted">${c.count}건 · ${fmtHours(c.minutes)}</span></div>
-            <div class="cat-bar-track"><div class="cat-bar-fill" style="width:${(c.count / max) * 100}%"></div></div></div>`;
+        return `<div class="cat-bar"><div class="cat-bar-head"><span><i class="bi ${cat.icon} me-1" style="color:${cat.color}"></i>${esc(cat.label)}</span><span class="text-muted">${c.count}건 · ${fmtHours(c.minutes)}</span></div>
+            <div class="cat-bar-track"><div class="cat-bar-fill" style="width:${(c.count / max) * 100}%; background:${cat.color}"></div></div></div>`;
     }).join('') || '<div class="empty-state">데이터 없음</div>';
 
     const byEq = Object.fromEntries(s.by_equipment.map((e) => [e.equipment, e]));

@@ -115,7 +115,7 @@
                             </div>
                             <div>
                                 <label class="mini-label">분류</label>
-                                <div class="cat-pills" id="categoryGrid">{% for code, label, icon in categories %}<button type="button" class="work-type-btn{% if code == 'ETC' %} active{% endif %}" data-category="{{ code }}"><i class="bi {{ icon }}"></i>{{ label }}</button>{% endfor %}</div>
+                                <div class="cat-pills" id="categoryGrid">{% for code, label, icon, color in categories %}<button type="button" class="work-type-btn{% if code == default_category %} active{% endif %}" data-category="{{ code }}" style="--cat: {{ color }}"><i class="bi {{ icon }}"></i>{{ label }}</button>{% endfor %}</div>
                             </div>
                             <div>
                                 <label class="mini-label">요약 <small class="fw-normal">비우면 첫 줄로 자동</small></label>

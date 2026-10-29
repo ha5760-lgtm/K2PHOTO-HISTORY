@@ -574,3 +574,11 @@ mark { padding: 0 2px; background: rgba(255,209,102,0.5); border-radius: 2px; }
 }
 .fab-button:hover { background: var(--primary-dark); transform: scale(1.08); }
 .toast-container { z-index: 1090; }
+
+/* 분류 색상 (--cat 은 분류별로 inline 지정) */
+.cat-badge { --cat: var(--text-secondary); padding: 2px 8px; border-radius: 20px; font-weight: 600;
+    color: var(--cat); background: color-mix(in srgb, var(--cat) 12%, transparent); }
+.cat-badge i { color: var(--cat); }
+.cat-pills .work-type-btn i { color: var(--cat); }
+.cat-pills .work-type-btn:hover { border-color: var(--cat); color: var(--cat); }
+.cat-pills .work-type-btn.active { border-color: var(--cat); color: var(--cat); background: color-mix(in srgb, var(--cat) 12%, transparent); }

@@ -61,7 +61,7 @@ def test_ai_organize_rule_fallback(client):
     assert r['engine'] == 'rule'
     assert r['equipment'] == ['PAA7302']
     assert (r['start_time'], r['end_time']) == ('13:00', '17:30')
-    assert r['category'] == 'CAL'
+    assert r['category'] == 'SETUP'
     assert '▶ 후속: 내일 재측정 예정' in r['content']
     assert client.post('/api/ai/organize', json={'content': ' '}).status_code == 400
 
@@ -74,7 +74,7 @@ def test_ai_organize_llm(client, monkeypatch):
     def fake_chat(messages, **kw):
         sent['messages'] = messages
         return '```json\n' + json.dumps({
-            'content': '- Stage leveling 확인', 'summary': 'PAA7302 leveling', 'category': 'CAL',
+            'content': '- Stage leveling 확인', 'summary': 'PAA7302 leveling', 'category': 'SETUP',
             'equipment': ['paa7302', '엉뚱한값'], 'start_time': '25:00', 'end_time': None,
             'issues': [], 'next_actions': ['재측정']}, ensure_ascii=False) + '\n```'
     monkeypatch.setattr(llm, 'chat', fake_chat)
@@ -85,4 +85,4 @@ def test_ai_organize_llm(client, monkeypatch):
 
     monkeypatch.setattr(llm, 'chat', lambda *a, **k: 'not json')
     r = client.post('/api/ai/organize', json={'content': 'PTA7302 power on'}).get_json()
-    assert r['engine'] == 'rule' and 'warning' in r and r['category'] == 'POWER_ON'
+    assert r['engine'] == 'rule' and 'warning' in r and r['category'] == 'SETUP'

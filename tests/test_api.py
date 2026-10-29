@@ -1,6 +1,6 @@
 def _create(client, **kw):
     body = {'work_date': '2026-10-27', 'start_time': '09:00', 'end_time': '11:30',
-            'equipment': ['PAA7302'], 'category': 'CAL', 'content': 'Stage leveling 확인\n상세 내용'}
+            'equipment': ['PAA7302'], 'category': 'SETUP', 'content': 'Stage leveling 확인\n상세 내용'}
     body.update(kw)
     return client.post('/api/logs', json=body)
 
@@ -80,3 +80,30 @@ def test_stats(client):
     s = client.get('/api/stats').get_json()
     assert s['today_count'] == 1 and s['today_minutes'] == 150
     assert len(s['daily']) == 14
+
+
+def test_categories_and_legacy_migration(client):
+    import sqlite3
+    import app as k2
+    meta = client.get('/api/meta').get_json()
+    assert [c['label'] for c in meta['categories']] == ['설비 Down', '셋업', 'PM', '공통', '공정개선', '순간정지', '간단작업']
+    assert meta['default_category'] == 'SIMPLE'
+    log = client.post('/api/logs', json={'work_date': '2026-10-27', 'content': 'x'}).get_json()
+    assert log['category'] == 'SIMPLE'
+    conn = sqlite3.connect(k2.DATABASE)
+    conn.execute("UPDATE work_logs SET category = 'CAL' WHERE id = ?", (log['id'],))
+    conn.commit(); conn.close()
+    k2.init_db()
+    assert client.get('/api/logs').get_json()[0]['category'] == 'SETUP'
+
+
+def test_rule_category_guess():
+    import llm
+    g = llm.guess_category
+    assert g('PTH7301 COT spin motor alarm 발생, 설비 down → motor 교체') == 'DOWN'
+    assert g('handler 순간정지 robot timeout 리셋 후 정상') == 'MINOR_STOP'
+    assert g('주간 PM dev cup 세정') == 'PM'
+    assert g('focus offset 조정으로 CD uniformity 개선') == 'PROCESS'
+    assert g('PCW / CDA hook-up 점검') == 'SETUP'
+    assert g('주간 회의 일정 공유') == 'COMMON'
+    assert g('자료 정리') == 'SIMPLE'

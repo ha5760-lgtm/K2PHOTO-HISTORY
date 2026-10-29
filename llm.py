@@ -13,16 +13,30 @@ EQUIP_RE = re.compile(r'\bP[A-Z]{2}\d{4}\b')
 TIME_RE = re.compile(r'(\d{1,2}):?(\d{2})\s*[~\-–]\s*(\d{1,2}):?(\d{2})')
 HHMM_RE = re.compile(r'([01]\d|2[0-3]):[0-5]\d')
 
-# 분류 키워드 (규칙 기반). 앞쪽 분류가 우선.
+# 분류 키워드 (규칙 기반). 히트 수가 같으면 앞쪽 분류가 우선 → 장애성 분류를 먼저 둠.
 CATEGORY_KEYWORDS = [
-    ('MEETING', ['회의', '미팅', '협의', 'meeting', '공유회', '리뷰']),
-    ('MOVE_IN', ['반입', '설치 위치', 'move-in', 'move in', '반출', 'marking', '레벨링 패드']),
-    ('HOOKUP', ['hook-up', 'hookup', 'hook up', 'pcw', 'cda', 'exhaust', '배관', '유틸', 'drain', 'solvent', 'n2', '배기']),
-    ('POWER_ON', ['power-on', 'power on', '전원', 'emo', 'interlock', '인터락']),
-    ('SW', ['s/w', 'sw ', 'software', 'recipe', 'host', 'eap', '레시피', 'job ']),
-    ('CAL', ['calibration', 'cal ', 'leveling', 'alignment', 'offset', '보정', 'focus', 'stage']),
-    ('QUAL', ['qual', 'dummy', 'cd ', 'overlay', 'uniformity', '측정', 'run', '평가']),
+    ('MINOR_STOP', ['순간정지', '순간 정지', '일시정지', '일시 정지', 'minor stop', 'choko', '쵸코', '리셋', 'reset', '재시작', 'restart',
+                    'hang', '멈춤', 'jam', '재기동']),
+    ('DOWN', ['down', '다운', '고장', '알람', 'alarm', '에러', 'error', '트러블', 'trouble', 'bm', '교체', 'fail', '불량', '누수', 'leak',
+              '이상', '복구']),
+    ('PM', ['pm', '정기', '예방', '정기점검', '세정', '클리닝', 'cleaning', '소모품', '필터 교환', 'lamp 교환']),
+    ('PROCESS', ['공정개선', '개선', 'cd ', 'overlay', 'uniformity', 'focus', 'dose', '수율', 'defect', '최적화', 'margin', 'recipe 변경',
+                 'recipe 최적화']),
+    ('SETUP', ['셋업', 'setup', 'set-up', '반입', '설치', 'hook-up', 'hookup', 'pcw', 'cda', 'exhaust', '배관', '유틸', 'power-on', 'power on',
+               '전원', 'emo', 'interlock', 's/w', 'software', 'recipe', 'host', 'eap', 'calibration', 'leveling', 'alignment', 'offset',
+               'qual', 'dummy', '보정']),
+    ('COMMON', ['회의', '미팅', '협의', 'meeting', '교육', '보고', '공유', '인수인계', '안전']),
 ]
+
+CATEGORY_HINTS = {
+    'DOWN': '설비 고장·알람으로 생산 불가, 부품 교체/복구 작업',
+    'SETUP': '신규 설비 반입·설치·Hook-up·Power-on·S/W·Calibration·Qual 등 라인 셋업',
+    'PM': '정기/예방 보전, 세정, 소모품 교체',
+    'COMMON': '특정 설비가 아닌 공통 업무 (회의, 교육, 보고, 인수인계)',
+    'PROCESS': 'CD/Overlay/Focus 등 공정 성능 개선, recipe 최적화',
+    'MINOR_STOP': '짧은 정지 후 리셋·재시작으로 바로 복구된 순간정지',
+    'SIMPLE': '위에 해당하지 않는 간단한 작업',
+}
 
 
 def config():
@@ -54,7 +68,7 @@ def _bulletize(text):
     return lines
 
 
-def guess_category(text, default='ETC'):
+def guess_category(text, default='SIMPLE'):
     low = f' {(text or "").lower()} '
     best, best_hits = default, 0
     for code, words in CATEGORY_KEYWORDS:
@@ -90,7 +104,7 @@ def rule_organize(content, known_equipment=(), category=None):
     return {
         'content': organized or text.strip(),
         'summary': summary,
-        'category': guess_category(text, category or 'ETC'),
+        'category': guess_category(text, category or 'SIMPLE'),
         'equipment': found,
         'start_time': start, 'end_time': end,
         'issues': issues, 'next_actions': follow,
@@ -105,7 +119,8 @@ SYSTEM_PROMPT = """너는 삼성 반도체 K2 라인 포토(노광) 설비 셋�
 - 사실만 정리하고 없는 내용을 지어내지 않는다. 수치·호기명·부품명·벤더명은 원문 그대로 유지.
 - content: 핵심 작업을 "- " 로 시작하는 간결한 개조식 줄로. 후속 조치/예정 사항은 "▶ 후속: " 으로 시작하는 줄로 맨 아래에.
 - summary: 40자 이내 한 줄 요약 (명사형 종결, 예: "PAA7302 Stage leveling 1차 spec-in").
-- category: 다음 코드 중 하나 {categories}
+- category: 다음 코드 중 하나 (설명 참고)
+{categories}
 - equipment: 본문에 등장한 설비호기 목록 (예: PAA7302). 특정 호기가 없으면 ["공통"].
 - start_time / end_time: 본문에 작업시간이 있으면 "HH:MM", 없으면 null.
 - issues: 문제/이상 사항 목록, next_actions: 후속 조치 목록 (없으면 빈 배열).
@@ -143,7 +158,7 @@ def chat(messages, temperature=0.2, max_tokens=1200):
 
 
 def llm_organize(content, context):
-    categories = ', '.join(f"{c}({l})" for c, l in context['categories'])
+    categories = '\n'.join(f"  {c} ({l}): {CATEGORY_HINTS.get(c, '')}" for c, l in context['categories'])
     user = (f"작업일: {context.get('work_date') or '-'}\n"
             f"현재 선택된 설비호기: {', '.join(context.get('equipment') or []) or '없음'}\n"
             f"등록된 설비호기: {', '.join(context.get('known_equipment') or [])}\n"

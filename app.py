@@ -31,18 +31,23 @@ DEFAULT_EQUIPMENT = [
 ]
 VENDOR_MAP = {'T': 'TEL', 'A': 'ASML', 'S': 'SEMES', 'C': 'CANON'}
 
-# 라인 셋업 단계 분류
+# 작업 분류 (code, 표시명, 아이콘, 색상)
 CATEGORIES = [
-    ('MOVE_IN', '반입/설치', 'bi-truck'),
-    ('HOOKUP', 'Hook-up/유틸', 'bi-plug'),
-    ('POWER_ON', 'Power-on', 'bi-lightning-charge'),
-    ('SW', 'S/W 셋업', 'bi-cpu'),
-    ('CAL', 'Calibration', 'bi-sliders'),
-    ('QUAL', '공정 Qual', 'bi-patch-check'),
-    ('MEETING', '회의/협의', 'bi-people'),
-    ('ETC', '기타', 'bi-three-dots'),
+    ('DOWN', '설비 Down', 'bi-exclamation-octagon', '#ef476f'),
+    ('SETUP', '셋업', 'bi-tools', '#4361ee'),
+    ('PM', 'PM', 'bi-calendar-check', '#118ab2'),
+    ('COMMON', '공통', 'bi-people', '#64748b'),
+    ('PROCESS', '공정개선', 'bi-graph-up-arrow', '#06a77d'),
+    ('MINOR_STOP', '순간정지', 'bi-pause-circle', '#f59e0b'),
+    ('SIMPLE', '간단작업', 'bi-check2-square', '#8b5cf6'),
 ]
 CATEGORY_CODES = {c[0] for c in CATEGORIES}
+DEFAULT_CATEGORY = 'SIMPLE'
+# 이전 버전(셋업 단계 세분류) → 새 분류 자동 변환
+LEGACY_CATEGORY_MAP = {
+    'MOVE_IN': 'SETUP', 'HOOKUP': 'SETUP', 'POWER_ON': 'SETUP', 'SW': 'SETUP', 'CAL': 'SETUP', 'QUAL': 'SETUP',
+    'MEETING': 'COMMON', 'ETC': 'SIMPLE',
+}
 
 
 def vendor_of(name):
@@ -81,7 +86,7 @@ def init_db():
             end_time TEXT,
             duration_min INTEGER,
             equipment TEXT NOT NULL DEFAULT '공통',
-            category TEXT NOT NULL DEFAULT 'ETC',
+            category TEXT NOT NULL DEFAULT 'SIMPLE',
             content TEXT NOT NULL,
             summary TEXT,
             summary_auto INTEGER DEFAULT 0,
@@ -103,6 +108,8 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_attach_log ON attachments(log_id);
     ''')
+    for old, new in LEGACY_CATEGORY_MAP.items():
+        conn.execute('UPDATE work_logs SET category = ? WHERE category = ?', (new, old))
     if conn.execute('SELECT COUNT(*) FROM equipment').fetchone()[0] == 0:
         conn.executemany('INSERT INTO equipment (name, vendor, category) VALUES (?, ?, ?)',
                          [(n, vendor_of(n), category_of(n)) for n in DEFAULT_EQUIPMENT])
@@ -225,7 +232,7 @@ def build_record(data):
         'end_time': end,
         'duration_min': int(duration) if duration not in (None, '') else None,
         'equipment': normalize_equipment(data.get('equipment')),
-        'category': data.get('category') or 'ETC',
+        'category': data.get('category') or DEFAULT_CATEGORY,
         'content': content,
         'summary': summary or auto_summary(content),
         'summary_auto': 0 if summary else 1,
@@ -266,7 +273,8 @@ def query_logs(args):
 
 @app.route('/')
 def index():
-    return render_template('index.html', categories=CATEGORIES, common=COMMON)
+    return render_template('index.html', categories=CATEGORIES, common=COMMON,
+                           default_category=DEFAULT_CATEGORY)
 
 
 # ─── Meta ─────────────────────────────────────────────
@@ -282,7 +290,8 @@ def api_meta():
     return jsonify({
         'equipment': equipment,
         'authors': authors,
-        'categories': [{'code': c, 'label': l, 'icon': i} for c, l, i in CATEGORIES],
+        'categories': [{'code': c, 'label': l, 'icon': i, 'color': col} for c, l, i, col in CATEGORIES],
+        'default_category': DEFAULT_CATEGORY,
         'common': COMMON,
         'ai_engine': llm.engine_name(),
         'ai_enabled': llm.is_enabled(),
@@ -455,7 +464,8 @@ def api_ai_organize():
         'equipment': data.get('equipment') or [],
         'category': data.get('category'),
         'known_equipment': known,
-        'categories': [(c, l) for c, l, _ in CATEGORIES],
+        'categories': [(c, l) for c, l, *_ in CATEGORIES],
+        'default_category': DEFAULT_CATEGORY,
         'common': COMMON,
     })
     return jsonify(result)
@@ -505,8 +515,8 @@ def api_stats():
 
 EXPORT_COLS = [('work_date', '날짜'), ('time', '작업시간'), ('equipment', '설비호기'),
                ('category', '분류'), ('content', '작업내용'), ('summary', '요약'), ('author', '작성자')]
-CATEGORY_LABEL = {c: l for c, l, _ in CATEGORIES}
-LABEL_TO_CATEGORY = {l: c for c, l, _ in CATEGORIES}
+CATEGORY_LABEL = {c: l for c, l, *_ in CATEGORIES}
+LABEL_TO_CATEGORY = {l: c for c, l, *_ in CATEGORIES}
 
 
 def export_row(r):
@@ -610,7 +620,7 @@ def api_import():
         rows.append(build_record({
             'work_date': d, 'start_time': start, 'end_time': end,
             'equipment': cols[2], 'content': cols[3], 'summary': cols[4],
-            'category': LABEL_TO_CATEGORY.get(data.get('category'), data.get('category') or 'ETC'),
+            'category': LABEL_TO_CATEGORY.get(data.get('category'), data.get('category') or DEFAULT_CATEGORY),
             'author': data.get('author'),
         }))
     if not dry_run and rows:
