@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ko" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>K2 PHOTO History</title>
+    <link href="{{ url_for('static', filename='vendor/bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='vendor/bootstrap-icons.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/main.css') }}" rel="stylesheet">
+</head>
+<body>
+<nav class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+        <div class="sidebar-brand">
+            <i class="bi bi-journal-text"></i>
+            <span class="sidebar-brand-text">K2 PHOTO<small>History</small></span>
+        </div>
+        <button class="sidebar-toggle" id="sidebarToggle"><i class="bi bi-list"></i></button>
+    </div>
+    <ul class="sidebar-nav">
+        <li><a href="#daily" class="sidebar-nav-link active" data-view="daily"><i class="bi bi-pencil-square"></i><span>일일 작업 입력</span></a></li>
+        <li><a href="#history" class="sidebar-nav-link" data-view="history"><i class="bi bi-table"></i><span>작업 이력</span></a></li>
+        <li><a href="#stats" class="sidebar-nav-link" data-view="stats"><i class="bi bi-bar-chart-line"></i><span>셋업 현황</span></a></li>
+        <li class="sidebar-divider"></li>
+        <li><a href="#io" class="sidebar-nav-link" data-view="io"><i class="bi bi-arrow-left-right"></i><span>가져오기 / 내보내기</span></a></li>
+        <li><a href="#ai" class="sidebar-nav-link" data-view="ai"><i class="bi bi-robot"></i><span>AI 활용</span></a></li>
+    </ul>
+    <div class="sidebar-footer"><small class="sidebar-footer-text text-muted">K2 Line Setup · v0.1 draft</small></div>
+</nav>
+
+<div class="main-content">
+    <header class="topbar">
+        <div class="topbar-left">
+            <button class="btn btn-link d-md-none p-0" id="mobileSidebarToggle"><i class="bi bi-list fs-4"></i></button>
+            <h5 class="topbar-title mb-0" id="pageTitle">일일 작업 입력</h5>
+        </div>
+        <div class="topbar-center">
+            <div class="search-trigger">
+                <i class="bi bi-search"></i>
+                <input type="text" id="globalSearch" placeholder="작업내용 검색 후 Enter" autocomplete="off">
+                <kbd>Ctrl+K</kbd>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <span class="save-indicator" id="saveIndicator"><i class="bi bi-cloud-check"></i> <span>DB 연결됨</span></span>
+            <div class="author-badge">
+                <i class="bi bi-person-circle"></i>
+                <input type="text" id="globalAuthor" class="author-input" placeholder="작성자 이름">
+            </div>
+            <button class="theme-toggle" id="themeToggle" type="button"><i class="bi bi-moon-stars"></i><span class="theme-toggle-label">Dark</span></button>
+        </div>
+    </header>
+
+    <!-- ─── 일일 작업 입력 ─── -->
+    <section class="view container-fluid px-4 py-4" id="view-daily">
+        <div class="row g-4">
+            <div class="col-xl-5">
+                <div class="card shadow-sm entry-card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span class="fw-semibold"><i class="bi bi-lightning-charge text-primary me-1"></i> 빠른 입력</span>
+                        <small class="text-muted"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 저장</small>
+                    </div>
+                    <div class="card-body">
+                        <form id="entryForm" autocomplete="off">
+                            <div class="row g-3">
+                                <div class="col-12">
+                                    <label class="form-label">날짜</label>
+                                    <div class="input-group">
+                                        <button class="btn btn-outline-secondary" type="button" data-date-shift="-1" title="전날"><i class="bi bi-chevron-left"></i></button>
+                                        <input type="date" class="form-control" name="work_date" id="entryDate" required>
+                                        <span class="input-group-text" id="entryWeekday">-</span>
+                                        <button class="btn btn-outline-secondary" type="button" data-date-shift="1" title="다음날"><i class="bi bi-chevron-right"></i></button>
+                                        <button class="btn btn-outline-secondary" type="button" data-date-shift="today">오늘</button>
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">작업시간</label>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <input type="time" class="form-control" name="start_time" id="entryStart">
+                                        <span class="text-muted">~</span>
+                                        <input type="time" class="form-control" name="end_time" id="entryEnd">
+                                    </div>
+                                </div>
+                                <div class="col-12 time-presets">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-time-preset="now">지금</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-dur="30">+30분</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-dur="60">+1h</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-dur="120">+2h</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-dur="240">+4h</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-time-preset="day">주간 08~17</button>
+                                    <span class="duration-display ms-auto" id="durationDisplay">-</span>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label d-flex justify-content-between">
+                                        <span>설비호기 <small class="text-muted">(복수 선택 가능)</small></span>
+                                        <a href="#" class="small" id="addEquipLink"><i class="bi bi-plus-circle"></i> 호기 추가</a>
+                                    </label>
+                                    <div class="chip-group" id="equipChips"></div>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">분류</label>
+                                    <div class="work-type-grid" id="categoryGrid">
+                                        {% for code, label, icon in categories %}
+                                        <button type="button" class="work-type-btn{% if code == 'ETC' %} active{% endif %}" data-category="{{ code }}"><i class="bi {{ icon }}"></i>{{ label }}</button>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">작업내용</label>
+                                    <textarea class="form-control" name="content" id="entryContent" rows="5" required
+                                        placeholder="- Wafer stage leveling 확인, Z offset 재조정&#10;- 벤더(ASML) FSE 2명 지원, 내일 Recipe download 예정"></textarea>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">요약 <small class="text-muted">(비우면 첫 줄로 자동 요약)</small></label>
+                                    <input type="text" class="form-control" name="summary" id="entrySummary" maxlength="120" placeholder="한 줄 요약">
+                                </div>
+                                <div class="col-12 d-flex gap-2">
+                                    <button type="submit" class="btn btn-primary flex-fill" id="entrySubmit"><i class="bi bi-check-lg"></i> 저장</button>
+                                    <button type="button" class="btn btn-outline-secondary" id="entryCancelEdit" hidden><i class="bi bi-x-lg"></i> 수정 취소</button>
+                                    <button type="button" class="btn btn-outline-secondary" id="entryReset" title="입력 초기화"><i class="bi bi-eraser"></i></button>
+                                </div>
+                                <div class="col-12"><small class="text-muted" id="draftNote"><i class="bi bi-info-circle"></i> 입력 중인 내용은 브라우저에 임시 보관되고, 저장 시 DB에 기록됩니다.</small></div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <div class="col-xl-7">
+                <div class="row g-3 mb-3">
+                    <div class="col-sm-4"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="bi bi-list-check"></i></div><div><div class="kpi-value" id="dayCount">0</div><div class="kpi-label">선택일 작업 건수</div></div></div></div>
+                    <div class="col-sm-4"><div class="kpi-card kpi-green"><div class="kpi-icon"><i class="bi bi-clock"></i></div><div><div class="kpi-value" id="dayHours">0h</div><div class="kpi-label">선택일 작업시간</div></div></div></div>
+                    <div class="col-sm-4"><div class="kpi-card kpi-amber"><div class="kpi-icon"><i class="bi bi-hdd-rack"></i></div><div><div class="kpi-value" id="dayEquip">0</div><div class="kpi-label">작업 설비 수</div></div></div></div>
+                </div>
+                <div class="card shadow-sm">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span class="fw-semibold"><i class="bi bi-calendar-day me-1"></i> <span id="dayTitle">오늘</span> 작업 내역</span>
+                        <button class="btn btn-sm btn-outline-primary" id="copyDayConfluence"><i class="bi bi-clipboard"></i> Confluence 표로 복사</button>
+                    </div>
+                    <div class="card-body p-0" id="dayTimeline"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ─── 작업 이력 ─── -->
+    <section class="view container-fluid px-4 py-4" id="view-history" hidden>
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <form class="row g-3 align-items-end" id="filterForm">
+                    <div class="col-md-2"><label class="form-label small">From</label><input type="date" name="date_from" class="form-control form-control-sm"></div>
+                    <div class="col-md-2"><label class="form-label small">To</label><input type="date" name="date_to" class="form-control form-control-sm"></div>
+                    <div class="col-md-2"><label class="form-label small">설비호기</label><select name="equipment" class="form-select form-select-sm" id="filterEquip"><option value="">전체</option></select></div>
+                    <div class="col-md-2"><label class="form-label small">분류</label><select name="category" class="form-select form-select-sm" id="filterCategory"><option value="">전체</option></select></div>
+                    <div class="col-md-2"><label class="form-label small">검색어</label><input type="text" name="q" class="form-control form-control-sm" id="filterQ" placeholder="내용/요약"></div>
+                    <div class="col-md-2 d-flex gap-2">
+                        <button type="submit" class="btn btn-sm btn-primary flex-fill"><i class="bi bi-funnel"></i> 조회</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="filterReset"><i class="bi bi-x-lg"></i></button>
+                    </div>
+                    <div class="col-12 d-flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-sm btn-light" data-range="7">최근 7일</button>
+                        <button type="button" class="btn btn-sm btn-light" data-range="30">최근 30일</button>
+                        <button type="button" class="btn btn-sm btn-light" data-range="week">이번 주</button>
+                        <button type="button" class="btn btn-sm btn-light" data-range="all">전체</button>
+                        <span class="ms-auto small text-muted align-self-center" id="historyCount"></span>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <div class="card shadow-sm">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 history-table">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width:120px">날짜</th>
+                                <th style="width:120px">작업시간</th>
+                                <th style="width:150px">설비호기</th>
+                                <th style="width:110px">분류</th>
+                                <th>작업내용</th>
+                                <th style="width:22%">요약</th>
+                                <th style="width:80px">작성자</th>
+                                <th style="width:70px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ─── 셋업 현황 ─── -->
+    <section class="view container-fluid px-4 py-4" id="view-stats" hidden>
+        <div class="row g-3 mb-4">
+            <div class="col-md-3"><div class="kpi-card kpi-blue"><div class="kpi-icon"><i class="bi bi-journal-text"></i></div><div><div class="kpi-value" id="kTotal">0</div><div class="kpi-label">누적 작업 건수</div></div></div></div>
+            <div class="col-md-3"><div class="kpi-card kpi-green"><div class="kpi-icon"><i class="bi bi-hourglass-split"></i></div><div><div class="kpi-value" id="kTotalHours">0h</div><div class="kpi-label">누적 작업시간</div></div></div></div>
+            <div class="col-md-3"><div class="kpi-card kpi-amber"><div class="kpi-icon"><i class="bi bi-calendar-week"></i></div><div><div class="kpi-value" id="kWeek">0</div><div class="kpi-label">이번 주 건수 / 시간</div></div></div></div>
+            <div class="col-md-3"><div class="kpi-card kpi-red"><div class="kpi-icon"><i class="bi bi-exclamation-triangle"></i></div><div><div class="kpi-value" id="kMissing">0</div><div class="kpi-label">작업시간 미입력</div></div></div></div>
+        </div>
+        <div class="row g-4">
+            <div class="col-lg-8"><div class="card shadow-sm h-100"><div class="card-header fw-semibold">최근 14일 작업 추이</div><div class="card-body"><div class="chart-box"><canvas id="chartDaily"></canvas></div></div></div></div>
+            <div class="col-lg-4"><div class="card shadow-sm h-100"><div class="card-header fw-semibold">분류별 비중</div><div class="card-body"><div id="categoryBars"></div></div></div></div>
+            <div class="col-12"><div class="card shadow-sm"><div class="card-header fw-semibold">설비호기별 작업 (최근 14일)</div><div class="card-body"><div class="equip-grid" id="equipGrid"></div></div></div></div>
+        </div>
+    </section>
+
+    <!-- ─── 가져오기 / 내보내기 ─── -->
+    <section class="view container-fluid px-4 py-4" id="view-io" hidden>
+        <div class="row g-4">
+            <div class="col-lg-7">
+                <div class="card shadow-sm">
+                    <div class="card-header fw-semibold"><i class="bi bi-box-arrow-in-down me-1"></i> Confluence 표 가져오기</div>
+                    <div class="card-body">
+                        <p class="small text-muted mb-2">Confluence 페이지의 표를 드래그 복사해서 붙여넣으세요. 컬럼 순서: <b>날짜 | 작업시간 | 설비호기 | 작업내용 | 요약</b>. 날짜 셀이 병합돼 비어 있으면 윗 행 날짜를 이어받습니다.</p>
+                        <textarea class="form-control font-mono mb-3" id="importText" rows="9" placeholder="10/27&#9;09:00~11:30&#9;PAA7302&#9;Wafer stage leveling 확인&#9;leveling 확인&#10;&#9;13:00~17:00&#9;공통&#9;Hook-up 점검 회의&#9;"></textarea>
+                        <div class="row g-2 align-items-end">
+                            <div class="col-sm-3"><label class="form-label small">기준 연도</label><input type="number" class="form-control form-control-sm" id="importYear"></div>
+                            <div class="col-sm-4"><label class="form-label small">분류 일괄 지정</label><select class="form-select form-select-sm" id="importCategory"></select></div>
+                            <div class="col-sm-5 d-flex gap-2">
+                                <button class="btn btn-sm btn-outline-primary flex-fill" id="importPreview"><i class="bi bi-eye"></i> 미리보기</button>
+                                <button class="btn btn-sm btn-primary flex-fill" id="importRun"><i class="bi bi-upload"></i> 가져오기</button>
+                            </div>
+                        </div>
+                        <div id="importResult" class="mt-3"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-5">
+                <div class="card shadow-sm">
+                    <div class="card-header fw-semibold"><i class="bi bi-box-arrow-up me-1"></i> 내보내기</div>
+                    <div class="card-body d-grid gap-2">
+                        <p class="small text-muted mb-1">작업 이력 탭의 현재 필터 조건이 적용됩니다.</p>
+                        <a class="btn btn-outline-success text-start" data-export="/api/export.csv"><i class="bi bi-filetype-csv me-2"></i>CSV (Excel)</a>
+                        <a class="btn btn-outline-primary text-start" data-export="/api/export.jsonl"><i class="bi bi-filetype-json me-2"></i>JSONL (AI / RAG 인덱싱용)</a>
+                        <button class="btn btn-outline-secondary text-start" id="copyConfluence"><i class="bi bi-clipboard me-2"></i>Confluence 표 마크업 복사</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ─── AI 활용 ─── -->
+    <section class="view container-fluid px-4 py-4" id="view-ai" hidden>
+        <div class="row g-4">
+            <div class="col-lg-5">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header fw-semibold"><i class="bi bi-robot me-1"></i> AI 활용 로드맵</div>
+                    <div class="card-body">
+                        <ul class="ai-roadmap">
+                            <li class="done"><i class="bi bi-check-circle-fill"></i><div><b>구조화 저장</b><br><small>날짜·시간·호기·분류·내용·요약을 필드 단위로 SQLite에 저장</small></div></li>
+                            <li class="done"><i class="bi bi-check-circle-fill"></i><div><b>JSONL Export</b><br><small>레코드당 1줄, <code>text</code> 필드에 검색용 문장 생성 → RAG 인덱싱 바로 투입</small></div></li>
+                            <li><i class="bi bi-circle"></i><div><b>LLM 자동 요약</b><br><small>요약 미입력 시 현재는 첫 줄 사용 → LLM 요약으로 교체 (<code>auto_summary()</code>)</small></div></li>
+                            <li><i class="bi bi-circle"></i><div><b>주간 리포트 생성</b><br><small>기간/호기 필터 결과를 묶어 주간 셋업 보고서 초안 작성</small></div></li>
+                            <li><i class="bi bi-circle"></i><div><b>photo-ai-bot 연동</b><br><small>"PAA7302 leveling 이슈 이력?" 같은 질문에 이 DB를 검색 소스로 사용</small></div></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-7">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span class="fw-semibold"><i class="bi bi-filetype-json me-1"></i> AI 입력 데이터 미리보기 (최근 5건)</span>
+                        <a class="btn btn-sm btn-outline-primary" href="/api/export.jsonl"><i class="bi bi-download"></i> 전체 JSONL</a>
+                    </div>
+                    <div class="card-body"><pre class="jsonl-preview" id="jsonlPreview"></pre></div>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog modal-lg"><div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title"><i class="bi bi-pencil"></i> 작업 수정</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <div class="row g-3">
+                <div class="col-md-4"><label class="form-label">날짜</label><input type="date" class="form-control" id="editDate"></div>
+                <div class="col-md-4"><label class="form-label">시작</label><input type="time" class="form-control" id="editStart"></div>
+                <div class="col-md-4"><label class="form-label">종료</label><input type="time" class="form-control" id="editEnd"></div>
+                <div class="col-md-8"><label class="form-label">설비호기 <small class="text-muted">(콤마 구분, 공통)</small></label><input type="text" class="form-control" id="editEquip"></div>
+                <div class="col-md-4"><label class="form-label">분류</label><select class="form-select" id="editCategory"></select></div>
+                <div class="col-12"><label class="form-label">작업내용</label><textarea class="form-control" id="editContent" rows="5"></textarea></div>
+                <div class="col-12"><label class="form-label">요약</label><input type="text" class="form-control" id="editSummary"></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-outline-danger me-auto" id="editDelete"><i class="bi bi-trash"></i> 삭제</button>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+            <button type="button" class="btn btn-primary" id="editSave"><i class="bi bi-check-lg"></i> 저장</button>
+        </div>
+    </div></div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3"><div class="toast align-items-center border-0" id="toast" role="status"><div class="d-flex"><div class="toast-body" id="toastBody"></div><button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button></div></div></div>
+
+<script src="{{ url_for('static', filename='vendor/bootstrap.bundle.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/chart.umd.js') }}"></script>
+<script>window.COMMON = {{ common|tojson }};</script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
