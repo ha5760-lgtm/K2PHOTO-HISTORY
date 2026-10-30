@@ -251,27 +251,41 @@
     <!-- ─── 가져오기 / 내보내기 ─── -->
     <section class="view container-fluid px-4 py-4" id="view-io" hidden>
         <div class="row g-4">
-            <div class="col-lg-7">
+            <div class="col-xxl-8 col-12">
                 <div class="card shadow-sm">
-                    <div class="card-header fw-semibold"><i class="bi bi-box-arrow-in-down me-1"></i> Confluence 표 가져오기</div>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span class="fw-semibold"><i class="bi bi-box-arrow-in-down me-1"></i> Confluence 표 → AI 자동 정리 · 등록</span>
+                        <span class="badge text-bg-light" id="importEngine"></span>
+                    </div>
                     <div class="card-body">
-                        <p class="small text-muted mb-2">Confluence 페이지의 표를 <b>머리글 행까지</b> 드래그 복사해서 아래에 붙여넣으세요. 셀 안 줄바꿈·병합 셀까지 그대로 인식합니다.<br>
-                        머리글로 열을 자동 판단: <b>완료여부 | 날짜/근무 | 호기명 | 작업명 | EDM CTTTM LINK | 작업내용</b> (작업내용의 1. 현상 / 2. 조치사항 / 3. 결론 자동 분리). 이전 형식(날짜 | 작업시간 | 설비호기 | 작업내용 | 요약)도 지원.</p>
-                        <textarea class="form-control font-mono mb-3" id="importText" rows="9" placeholder="Confluence 표를 여기에 붙여넣기 (Ctrl+V)"></textarea>
-                        <div class="small text-primary mb-2" id="importInfo"></div>
-                        <div class="row g-2 align-items-end">
-                            <div class="col-sm-3"><label class="form-label small">기준 연도</label><input type="number" class="form-control form-control-sm" id="importYear"></div>
-                            <div class="col-sm-4"><label class="form-label small">분류 일괄 지정</label><select class="form-select form-select-sm" id="importCategory"></select></div>
-                            <div class="col-sm-5 d-flex gap-2">
-                                <button class="btn btn-sm btn-outline-primary flex-fill" id="importPreview"><i class="bi bi-eye"></i> 미리보기</button>
-                                <button class="btn btn-sm btn-primary flex-fill" id="importRun"><i class="bi bi-upload"></i> 가져오기</button>
+                        <ol class="import-steps">
+                            <li>Confluence 작업이력 표를 <b>머리글 행까지</b> 드래그해서 복사 (<kbd>Ctrl</kbd>+<kbd>C</kbd>)</li>
+                            <li>아래 칸에 붙여넣기 (<kbd>Ctrl</kbd>+<kbd>V</kbd>)</li>
+                            <li>AI 가 행마다 <b>작업명 · 1.현상 2.조치사항 3.결론 · 완료여부 · 근무 · 호기 · 분류 · 링크</b>를 정리해서 바로 등록</li>
+                        </ol>
+                        <textarea class="form-control font-mono import-paste" id="importText" rows="6" placeholder="여기에 Confluence 표를 붙여넣으세요 (Ctrl+V)&#10;&#10;· 셀 안 줄바꿈 · 병합된 날짜/근무 칸 유지&#10;· 머리글로 열 자동 인식 (완료여부 | 날짜/근무 | 호기명 | 작업명 | EDM CTTTM LINK | 작업내용)&#10;· 표에 적힌 값은 그대로, 빈 칸과 정리 안 된 작업내용만 AI 가 채움&#10;· 같은 표를 다시 붙여넣어도 이미 등록된 행은 건너뜀"></textarea>
+                        <div class="small text-primary mt-2" id="importInfo"></div>
+                        <div class="row g-2 align-items-end mt-1">
+                            <div class="col-sm-2"><label class="form-label small">기준 연도</label><input type="number" class="form-control form-control-sm" id="importYear"></div>
+                            <div class="col-sm-3"><label class="form-label small">분류 기본값</label><select class="form-select form-select-sm" id="importCategory"></select></div>
+                            <div class="col-sm-7 d-flex flex-wrap gap-3 align-items-center pb-1">
+                                <div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="importAi" checked><label class="form-check-label small" for="importAi">AI 자동 정리</label></div>
+                                <div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="importAuto" checked><label class="form-check-label small" for="importAuto">붙여넣으면 바로 등록</label></div>
                             </div>
+                        </div>
+                        <div class="d-flex gap-2 mt-3">
+                            <button class="btn btn-sm btn-outline-primary" id="importPreview"><i class="bi bi-eye"></i> 미리보기 (저장 안 함)</button>
+                            <button class="btn btn-sm btn-primary px-3" id="importRun"><i class="bi bi-stars"></i> 정리해서 등록</button>
+                        </div>
+                        <div class="import-progress mt-3" id="importProgress" hidden>
+                            <div class="progress" role="progressbar"><div class="progress-bar progress-bar-striped progress-bar-animated" style="width:100%"></div></div>
+                            <small class="text-muted" id="importProgressText"></small>
                         </div>
                         <div id="importResult" class="mt-3"></div>
                     </div>
                 </div>
             </div>
-            <div class="col-lg-5">
+            <div class="col-xxl-4 col-12">
                 <div class="card shadow-sm">
                     <div class="card-header fw-semibold"><i class="bi bi-box-arrow-up me-1"></i> 내보내기</div>
                     <div class="card-body d-grid gap-2">

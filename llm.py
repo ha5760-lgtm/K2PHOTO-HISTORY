@@ -15,7 +15,7 @@ EQUIP_RE = re.compile(r'\bP[A-Z]{2}\d{4}\b')
 TIME_RE = re.compile(r'(\d{1,2}):?(\d{2})\s*[~\-–]\s*(\d{1,2}):?(\d{2})')
 HHMM_RE = re.compile(r'([01]\d|2[0-3]):[0-5]\d')
 
-# 분류 키워드 (규칙 기반). 히트 수가 같으면 앞쪽 분류가 우선 → 장애성 분류를 먼저 둠.
+# 분류 키워드 (규칙 기반). 히트 수가 같으면 앞쪽 분류가 우선 → 장애성 분류를 먼저, 회의·교육(공통업무)은 셋업보다 먼저.
 CATEGORY_KEYWORDS = [
     ('MINOR_STOP', ['순간정지', '순간 정지', '일시정지', '일시 정지', 'minor stop', 'choko', '쵸코', '리셋', 'reset', '재시작', 'restart',
                     'hang', '멈춤', 'jam', '재기동']),
@@ -24,10 +24,10 @@ CATEGORY_KEYWORDS = [
     ('PM', ['pm', '정기', '예방', '정기점검', '세정', '클리닝', 'cleaning', '소모품', '필터 교환', 'lamp 교환']),
     ('PROCESS', ['공정개선', '개선', 'cd ', 'overlay', 'uniformity', 'focus', 'dose', '수율', 'defect', '최적화', 'margin', 'recipe 변경',
                  'recipe 최적화']),
+    ('COMMON', ['회의', '미팅', '협의', 'meeting', '교육', '보고', '공유', '인수인계', '안전']),
     ('SETUP', ['셋업', 'setup', 'set-up', '반입', '설치', 'hook-up', 'hookup', 'pcw', 'cda', 'exhaust', '배관', '유틸', 'power-on', 'power on',
                '전원', 'emo', 'interlock', 's/w', 'software', 'recipe', 'host', 'eap', 'calibration', 'leveling', 'alignment', 'offset',
                'qual', 'dummy', '보정']),
-    ('COMMON', ['회의', '미팅', '협의', 'meeting', '교육', '보고', '공유', '인수인계', '안전']),
 ]
 
 CATEGORY_HINTS = {
@@ -291,3 +291,78 @@ def organize(content, context):
         print(f'[llm] organize failed, fallback to rule: {type(e).__name__}')
         return {**_clean(fallback, fallback, codes, common), 'engine': 'rule',
                 'warning': 'LLM 호출 실패 → 규칙 기반으로 정리했습니다'}
+
+
+# ─── Confluence 표 여러 행 일괄 정리 ──────────────────
+
+ROWS_PROMPT = """너는 삼성 반도체 K2 라인 포토(노광) 설비 엔지니어의 작업이력 정리 도우미다.
+Confluence 작업이력 표에서 복사한 여러 행을 받아, 각 행을 작업이력 1건으로 정리한다.
+각 행은 '열이름: 값' 형식이며 열 구성은 표마다 다를 수 있다.
+규칙:
+- 사실만 정리하고 없는 내용을 지어내지 않는다. 수치·호기명·부품명·알람코드·벤더명은 원문 그대로 유지. 없으면 빈 문자열.
+- work_date: 날짜 (YYYY-MM-DD). 연도가 없으면 기준 연도 {year} 사용. 날짜를 알 수 없으면 null.
+- shift: 근무 DAY / SW / GY 중 하나 (표에 있거나 시간으로 판단 가능할 때만, 아니면 null).
+- status: 완료여부 "closed" 또는 "ongoing". 표에 값이 있으면 그대로, 없으면 결론 기준으로 판단.
+- equipment: 설비호기 목록 (예: ["PAA7302"]). 특정 호기가 없으면 ["공통"].
+- title: 작업명 30자 이내 명사형. 표에 작업명이 있으면 그대로 사용.
+- symptom / action / result: 작업내용을 1. 현상 / 2. 조치사항 / 3. 결론 으로 나눈 것. 여러 개면 "- " 개조식 줄.
+- link: EDM / CTTTM 번호나 URL. category: 다음 코드 중 하나
+{categories}
+반드시 JSON 배열 하나만 출력한다. 입력 행과 같은 순서·같은 개수이며 각 원소의 키:
+index, work_date, shift, status, equipment, title, symptom, action, result, link, category"""
+
+
+def llm_organize_rows(rows, context):
+    categories = '\n'.join(f"  {c} ({l}): {CATEGORY_HINTS.get(c, '')}" for c, l in context['categories'])
+    body = '\n\n'.join(f"### 행 {i}\n{text}" for i, text in enumerate(rows))
+    user = (f"등록된 설비호기: {', '.join(context.get('known_equipment') or [])}\n"
+            f"기준 연도: {context.get('year')}\n--- 표 행 ({len(rows)}개) ---\n{body}")
+    raw = chat([{'role': 'system', 'content': ROWS_PROMPT.format(categories=categories, year=context.get('year'))},
+                {'role': 'user', 'content': user}], max_tokens=min(8000, 600 * len(rows) + 400))
+    text = re.sub(r'^```(?:json)?|```$', '', (raw or '').strip(), flags=re.M).strip()
+    start, end = text.find('['), text.rfind(']')
+    if start < 0 or end < start:
+        raise ValueError('LLM 응답에서 JSON 배열을 찾지 못했습니다')
+    items = json.loads(text[start:end + 1])
+    if not isinstance(items, list):
+        raise ValueError('LLM 응답이 배열이 아닙니다')
+    by_index = {}
+    for pos, it in enumerate(items):
+        if isinstance(it, dict):
+            idx = it.get('index') if isinstance(it.get('index'), int) else pos
+            by_index[idx] = it
+    return by_index
+
+
+def _row_extras(result):
+    """행 정리 결과에서 날짜/근무만 검증해서 꺼냄."""
+    d = result.get('work_date') if isinstance(result.get('work_date'), str) else None
+    sh = (result.get('shift') or '').upper() if isinstance(result.get('shift'), str) else ''
+    return {'work_date': d if d and re.fullmatch(r'\d{4}-\d{2}-\d{2}', d) else None,
+            'shift': sh if sh in ('DAY', 'SW', 'GY') else None}
+
+
+def organize_rows(rows, rule_texts, context, chunk=10):
+    """표 여러 행 → 행별 정리 결과 목록 (입력과 같은 순서).
+    rows: LLM 용 '열이름: 값' 텍스트, rule_texts: 규칙 기반용 본문 텍스트.
+    LLM 은 chunk 행씩 묶어서 호출, 실패한 묶음만 규칙 기반으로 폴백. 반환: (results, engine, warning)."""
+    codes = {c for c, _ in context['categories']}
+    common = context.get('common', '공통')
+    fallbacks = [rule_organize(t, context.get('known_equipment', ()), context.get('category')) for t in rule_texts]
+    rule_result = lambda fb: {**_clean(fb, fb, codes, common), 'work_date': None, 'shift': None, 'engine': 'rule'}
+    if not is_enabled():
+        return [rule_result(fb) for fb in fallbacks], 'rule', None
+    out, failed = [], 0
+    for i in range(0, len(rows), chunk):
+        part = rows[i:i + chunk]
+        try:
+            got = llm_organize_rows(part, context)
+        except (urllib.error.URLError, TimeoutError, ValueError, KeyError, IndexError, json.JSONDecodeError) as e:
+            print(f'[llm] organize_rows failed, fallback to rule: {type(e).__name__}')
+            got, failed = {}, failed + len(part)
+        for j in range(len(part)):
+            fb = fallbacks[i + j]
+            r = got.get(j)
+            out.append({**_clean(r, fb, codes, common), **_row_extras(r), 'engine': 'llm'} if r else rule_result(fb))
+    warning = f'LLM 정리 실패 {failed}행 → 규칙 기반으로 정리' if failed else None
+    return out, ('llm' if failed < len(rows) else 'rule'), warning

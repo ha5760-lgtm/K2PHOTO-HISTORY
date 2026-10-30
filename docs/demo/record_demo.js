@@ -183,20 +183,24 @@ const overlay = () => {
   await click('[data-view="stats"]', { after: 900 });
   await caption('Setup Dashboard: 누적 · 주간 · 14일 추이 · 분류 · 호기별', '', 2800);
 
-  // 8. Confluence 가져오기
+  // 8. Confluence 가져오기 → AI 자동 정리 · 등록
   await click('[data-view="io"]', { after: 700 });
-  await caption('기존 Confluence 표 → 그대로 복사해서 붙여넣기', '머리글 자동 인식 · 셀 안 줄바꿈 · 병합된 날짜/근무 칸까지 유지', 1000);
+  await caption('Confluence 표를 복사해서 붙여넣기만 하면', 'AI 가 행마다 작업명 · 현상/조치/결론 · 완료여부 · 근무 · 분류를 정리해서 바로 등록', 1600);
   await click('#importText', { after: 200 });
   await p.evaluate(() => {
     const html = `<table><tr><th>완료여부</th><th>날짜/근무</th><th>호기명</th><th>작업명</th><th>EDM CTTTM LINK</th><th>작업내용</th></tr>
-      <tr><td>Closed</td><td rowspan="2">10/14<br>DAY</td><td>PAH7304</td><td>Reticle stage 초기 Cal</td><td>EDM-50777</td><td><p>1. 현상</p><p>Reticle stage 초기 상태</p><p>2. 조치사항</p><p>Calibration, mark 인식 확인</p><p>3. 결론</p><p>인식률 99.2% 정상</p></td></tr>
-      <tr><td>On-going</td><td>PSH7306</td><td>Drain 배관 누수</td><td></td><td>1. 현상<br>Drain 배관 누수<br>2. 조치사항<br>배관 재체결<br>3. 결론<br>재발 모니터링 필요</td></tr></table>`;
+      <tr><td></td><td rowspan="2">10/14<br>GY</td><td>PTH7301</td><td></td><td>CTTTM-240098</td><td>DEV unit nozzle alarm 발생 설비 down. nozzle 교체 후 복구 dummy 3매 OK. vendor 원인 회신 대기</td></tr>
+      <tr><td>Closed</td><td>PAA7302</td><td>Leveling 재측정</td><td></td><td><p>1. 현상</p><p>Z leveling spec-out 0.35um</p><p>2. 조치사항</p><ul><li>Z offset 재조정</li><li>재측정 3회</li></ul><p>3. 결론</p><p>spec-in 0.12um</p></td></tr>
+      <tr><td></td><td>10/15 DAY</td><td>PTA7302</td><td></td><td></td><td>주간 PM DEV cup 세정 filter 교체 후 배기압 정상</td></tr>
+      <tr><td></td><td>10/15 SW</td><td>PAA7302</td><td></td><td></td><td>handler robot timeout 순간정지 리셋 후 정상 진행</td></tr></table>`;
     const dt = new DataTransfer(); dt.setData('text/html', html); dt.setData('text/plain', 'table');
     document.querySelector('#importText').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
   });
-  await wait(2200);
-  await snap();
-  await click('#importRun', { after: 1600 });
+  await p.waitForSelector('.import-summary.done', { timeout: 20000 });
+  await wait(600);
+  await caption('붙여넣는 즉시 4건 정리 · 등록 완료', '빈 작업명·완료여부·분류는 AI 가 채움 · 표에 적힌 값은 그대로', 2600);
+  await moveTo('[data-import-undo]');
+  await caption('같은 표를 다시 붙여넣으면 이미 있는 행은 건너뜀', '잘못 붙였으면 "이번 가져오기 취소" 한 번으로 되돌리기', 2400);
   await caption('CSV · JSONL(AI용) · Confluence 마크업으로 내보내기도 가능', '', 1800);
 
   // 9. Theme

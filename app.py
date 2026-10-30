@@ -11,6 +11,7 @@ import io
 import re
 import json as _json
 import uuid
+import hashlib
 from datetime import datetime, timedelta, date
 import llm
 from sections import SECTIONS, SECTION_KEYS, parse_sections, compose_content
@@ -757,54 +758,148 @@ def table_rows(data):
     return [r for r in csv.reader(io.StringIO(data.get('text') or ''), delimiter='\t')]
 
 
+def row_texts(f, labels):
+    """행 → (LLM 용 '열이름: 값' 텍스트, 규칙 기반용 본문)."""
+    llm_text = '\n'.join(f'{labels.get(k, k)}: {v}' for k, v in f.items() if v)
+    rule_text = '\n'.join(x for x in [f"[작업명] {f['title']}" if f.get('title') else '', f.get('content', ''),
+                                       f.get('link', ''), f.get('equipment', '')] if x)
+    return llm_text, rule_text
+
+
+def merge_ai(f, ai, base):
+    """표에 적힌 값은 그대로 두고, 비어 있거나 정리가 필요한 칸만 AI 결과로 채움."""
+    rec = dict(base)
+    if parse_sections(f.get('content')) is None and any(ai.get(k) for k in SECTION_KEYS):
+        rec.update({k: ai.get(k, '') for k in SECTION_KEYS})   # 1/2/3 구분이 없던 작업내용 → AI 가 나눔
+        rec.pop('content', None)
+    if not f.get('title') and ai.get('title'):
+        rec['title'] = ai['title']
+    if not f.get('status') and ai.get('status'):
+        rec['status'] = ai['status']
+    if not rec.get('shift') and ai.get('shift'):
+        rec['shift'] = ai['shift']
+    if not f.get('equipment') and ai.get('equipment'):
+        rec['equipment'] = ai['equipment']
+    if not f.get('link') and ai.get('link'):
+        rec['link'] = ai['link']
+    if not f.get('category') and ai.get('category'):
+        rec['category'] = ai['category']
+    if not rec.get('work_date') and ai.get('work_date'):
+        rec['work_date'] = ai['work_date']
+    return rec
+
+
+def row_fingerprint(f):
+    """원본 표 행 기준 지문 → 같은 표를 다시 붙여넣어도 (AI 결과가 달라도) 중복 등록 안 함."""
+    raw = '\x1f'.join(re.sub(r'\s+', ' ', f.get(k) or '').strip() for k in sorted(f))
+    return hashlib.sha1(raw.encode()).hexdigest()[:12]
+
+
+def is_duplicate(conn, rec):
+    fp = (rec.get('tags') or '').rsplit(':', 1)[-1]
+    return conn.execute("SELECT 1 FROM work_logs WHERE tags LIKE ? OR (work_date = ? AND equipment = ? AND title = ? AND content = ?)",
+                        (f'import:%:{fp}', rec['work_date'], rec['equipment'], rec['title'], rec['content'])).fetchone() is not None
+
+
 @app.route('/api/import', methods=['POST'])
 def api_import():
-    """Confluence 표 붙여넣기 → 일괄 등록.
+    """Confluence 표 붙여넣기 → (AI 자동 정리) → 일괄 등록.
     헤더(완료여부 | 날짜/근무 | 호기명 | 작업명 | EDM CTTTM LINK | 작업내용 …)를 자동 인식, 헤더가 없으면 그 순서로 간주.
-    이전 형식(날짜 | 작업시간 | 설비호기 | 작업내용 | 요약)도 헤더로 인식. 날짜 칸이 비면 윗 행 날짜/근무를 이어받음."""
+    이전 형식(날짜 | 작업시간 | 설비호기 | 작업내용 | 요약)도 헤더로 인식. 날짜 칸이 비면 윗 행 날짜/근무를 이어받음.
+    ai=true 이면 행마다 작업명 · 1.현상 2.조치사항 3.결론 · 완료여부 · 근무 · 호기 · 분류 · 링크를 정리해서 채움
+    (표에 적힌 값이 우선). 이미 같은 기록이 있으면 건너뜀. batch 로 묶어 저장 → DELETE /api/import/<batch> 로 취소."""
     data = request.get_json(silent=True) or {}
     dry_run = bool(data.get('dry_run'))
+    use_ai = bool(data.get('ai'))
     year = int(data.get('year') or date.today().year)
     category = LABEL_TO_CATEGORY.get(data.get('category'), data.get('category') or DEFAULT_CATEGORY)
-    mapping = None
-    rows, errors, last_date, last_shift = [], [], None, None
+    batch = re.sub(r'[^\w-]', '', str(data.get('batch') or '')) or uuid.uuid4().hex[:12]
+    mapping, labels = None, {}
+    items, errors, last_date, last_shift = [], [], None, None
     for n, cells in enumerate(table_rows(data), 1):
         cells = [c.strip() for c in cells]
         if not any(cells):
             continue
         if mapping is None:
             header = map_header(cells)
-            mapping = header or dict(enumerate(DEFAULT_IMPORT_ORDER))
+            # 머리글이 없으면: 4열 이상은 기본 순서, 그보다 적으면 행 전체를 작업내용(메모)으로 간주
+            mapping = header or (dict(enumerate(DEFAULT_IMPORT_ORDER)) if len(cells) >= 4 else 'memo')
+            labels = {field: cells[i] for i, field in header.items()} if header else {}
             if header:
                 continue
-        f = {field: cells[i] if i < len(cells) else '' for i, field in mapping.items()}
-        date_cell = f.get('date', '')
-        d = parse_date(date_cell, year) if date_cell else last_date
-        if not d:
-            errors.append(f'{n}행: 날짜를 해석할 수 없습니다 ({date_cell!r})'); continue
+        if mapping == 'memo':
+            f = {'content': '\n'.join(c for c in cells if c)}
+        else:
+            f = {field: cells[i] if i < len(cells) else '' for i, field in mapping.items()}
         if not (f.get('content') or f.get('title')):
             errors.append(f'{n}행: 작업명/작업내용이 비어 있습니다'); continue
+        date_cell = f.get('date', '')
+        d = parse_date(date_cell, year) if date_cell else last_date
+        if not d and not use_ai:
+            errors.append(f'{n}행: 날짜를 해석할 수 없습니다 ({date_cell!r})'); continue
         start, end = parse_time_range(f.get('time') or '')
         shift = normalize_shift(f.get('shift')) or (parse_shift(date_cell) if date_cell else last_shift) or shift_of(start)
-        last_date, last_shift = d, shift
-        rows.append(build_record({
+        if d:
+            last_date, last_shift = d, shift
+        items.append((n, f, {
             'work_date': d, 'shift': shift, 'start_time': start, 'end_time': end,
             'status': parse_status(f.get('status')), 'equipment': f.get('equipment'),
             'title': f.get('title', ''), 'link': f.get('link'), 'content': f.get('content', ''),
             'category': LABEL_TO_CATEGORY.get(f.get('category'), category),
-            'author': f.get('author') or data.get('author'),
+            'author': f.get('author') or data.get('author'), 'tags': f'import:{batch}:{row_fingerprint(f)}',
         }))
-    if not dry_run and rows:
-        ts = now_iso()
+
+    engine, warning = None, None
+    if use_ai and items:
         conn = get_db()
-        for rec in rows:
-            rec['created_at'] = rec['updated_at'] = ts
-            conn.execute(f"INSERT INTO work_logs ({', '.join(rec)}) VALUES ({', '.join('?' * len(rec))})",
-                         list(rec.values()))
-        conn.commit()
+        known = [r[0] for r in conn.execute('SELECT name FROM equipment WHERE is_active = 1').fetchall()]
         conn.close()
-    return jsonify({'parsed': len(rows), 'imported': 0 if dry_run else len(rows),
-                    'errors': errors, 'preview': rows[:20]})
+        texts = [row_texts(f, labels) for _, f, _ in items]
+        results, engine, warning = llm.organize_rows([t[0] for t in texts], [t[1] for t in texts], {
+            'year': year, 'known_equipment': known, 'category': category,
+            'categories': [(c, l) for c, l, *_ in CATEGORIES], 'common': COMMON})
+        items = [(n, f, merge_ai(f, ai, base)) for (n, f, base), ai in zip(items, results)]
+
+    records = []
+    for n, f, base in items:
+        if not base.get('work_date'):
+            errors.append(f"{n}행: 날짜를 해석할 수 없습니다 ({f.get('date', '')!r})"); continue
+        problems = validate_payload(base)
+        if problems:
+            errors.append(f"{n}행: {' / '.join(problems)}"); continue
+        records.append(build_record(base))
+
+    imported, skipped = [], 0
+    conn = get_db()
+    for rec in records:
+        if is_duplicate(conn, rec):
+            skipped += 1
+            continue
+        if not dry_run:
+            rec['created_at'] = rec['updated_at'] = now_iso()
+            cur = conn.execute(f"INSERT INTO work_logs ({', '.join(rec)}) VALUES ({', '.join('?' * len(rec))})",
+                               list(rec.values()))
+            rec['id'] = cur.lastrowid
+        imported.append(rec)
+    conn.commit()
+    conn.close()
+    return jsonify({'parsed': len(records), 'imported': 0 if dry_run else len(imported), 'skipped': skipped,
+                    'errors': errors, 'preview': imported[:200], 'batch': batch,
+                    'engine': engine, 'warning': warning})
+
+
+@app.route('/api/import/<batch>', methods=['DELETE'])
+def api_import_undo(batch):
+    """가져오기 1회분 취소."""
+    conn = get_db()
+    pattern = f"import:{re.sub(r'[^\w-]', '', batch)}:%"
+    ids = [r[0] for r in conn.execute('SELECT id FROM work_logs WHERE tags LIKE ?', (pattern,)).fetchall()]
+    for log_id in ids:
+        remove_attachment_files(conn, 'log_id = ?', [log_id])
+    conn.execute('DELETE FROM work_logs WHERE tags LIKE ?', (pattern,))
+    conn.commit()
+    conn.close()
+    return jsonify({'deleted': len(ids)})
 
 
 init_db()

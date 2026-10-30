@@ -16,8 +16,8 @@ Confluence 페이지 표(날짜 / 작업시간 / 설비호기·공통 / 작업�
 | ![history](docs/screenshots/history.png) | ![popup](docs/screenshots/1_entry_popup.png) |
 | **Daily Log (컴팩트 입력)** | **Theme 패널 (Accent / Sidebar / Mode)** |
 | ![daily](docs/screenshots/2_daily.png) | ![theme](docs/screenshots/theme_teal.png) |
-| **Setup Dashboard** | **Dark + Rose 테마** |
-| ![stats](docs/screenshots/stats.png) | ![dark](docs/screenshots/theme_dark_rose.png) |
+| **Confluence 표 붙여넣기 → AI 정리 · 등록** | **Setup Dashboard** |
+| ![import](docs/screenshots/import_ai.png) | ![stats](docs/screenshots/stats.png) |
 
 ## 기능
 
@@ -43,8 +43,12 @@ Confluence 페이지 표(날짜 / 작업시간 / 설비호기·공통 / 작업�
 - **실시간 반영**: 5초마다 변경 확인, 다른 사람이 입력한 기록 자동 표시
 
 ### 가져오기 / 내보내기
-- **Confluence 표 가져오기**: 표를 머리글까지 복사해 붙여넣으면 HTML 표로 읽어 셀 안 줄바꿈·병합 셀까지 복원. 머리글로 열 자동 판단, 작업내용의 1/2/3 자동 분리.
-  이전 형식(날짜 | 작업시간 | 설비호기 | 작업내용 | 요약)도 지원
+- **Confluence 표 → AI 자동 정리 · 등록**: Confluence 작업이력 표를 머리글까지 복사해 붙여넣기만 하면 끝
+  - HTML 표로 읽어 셀 안 줄바꿈 · 병합된 날짜/근무 칸까지 복원, 머리글로 열 자동 인식 (이전 형식 · 머리글 없는 메모 행도 지원)
+  - AI(LLM, 10행씩 묶어 호출)가 행마다 작업명 · 1.현상 2.조치사항 3.결론 · 완료여부 · 근무 · 호기 · 분류 · 링크 · 빠진 날짜를 정리 →
+    **붙여넣는 즉시 등록**. 표에 적힌 값은 그대로 두고 빈 칸과 1/2/3 구분이 없는 작업내용만 채움
+  - 같은 표를 다시 붙여넣으면 이미 등록된 행은 건너뜀(원본 행 지문 비교), `이번 가져오기 취소`로 한 번에 되돌리기
+  - `붙여넣으면 바로 등록`을 끄면 미리보기 후 `이대로 등록`. LLM 미설정·실패 시 규칙 기반으로 정리
 - **내보내기**: CSV(Excel) / JSONL(AI·RAG용, 현상·조치·결론 필드 포함) / Confluence wiki markup 표 — 모두 위와 같은 열 순서
 - **테마**: 상단 `Theme` → Accent 9색 + 직접 선택, Sidebar 4종, Light/Dark (`static/js/theme.js`)
 
@@ -90,7 +94,8 @@ export LLM_MODEL=grok-4-fast-non-reasoning  # 선택
 | DELETE | `/api/attachments/<id>` | 캡처 삭제 |
 | POST | `/api/ai/organize` | AI 정리 (`title`, `symptom`, `action`, `result`, `equipment`, `category`, `start_time`) |
 | GET | `/api/version` | 실시간 갱신용 변경 감지 |
-| POST | `/api/import` | Confluence 표 가져오기 (`rows` 2차원 배열 또는 탭 구분 `text`, `dry_run` 지원) |
+| POST | `/api/import` | Confluence 표 가져오기 (`rows` 2차원 배열 또는 탭 구분 `text`, `ai` 자동 정리, `dry_run`) |
+| DELETE | `/api/import/<batch>` | 가져오기 1회분 취소 |
 | GET | `/api/export.csv`, `/api/export.jsonl`, `/api/export/confluence` | 내보내기 (조회와 같은 필터) |
 
 ## AI 활용 계획

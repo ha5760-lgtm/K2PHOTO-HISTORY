@@ -117,6 +117,7 @@ function switchView(view) {
 async function loadMeta() {
     state.meta = await api('/api/meta');
     $('#aiEngine').textContent = state.meta.ai_engine || '';
+    $('#importEngine').textContent = `AI: ${state.meta.ai_engine || ''}`;
     renderEquipChips();
     const catOpts = state.meta.categories.map((c) => `<option value="${c.code}">${esc(c.label)}</option>`).join('');
     $('#filterCategory').innerHTML = `<option value="">전체</option>${catOpts}`;
@@ -790,31 +791,78 @@ function htmlTableRows(html) {
 function onImportPaste(e) {
     const html = e.clipboardData.getData('text/html');
     const rows = html && htmlTableRows(html);
-    if (!rows || !rows.length) { state.importRows = null; return; }
-    e.preventDefault();
-    state.importRows = rows;
-    $('#importText').value = rows.map((r) => r.map((c) => c.replace(/\n/g, ' ⏎ ')).join('\t')).join('\n');
-    $('#importInfo').innerHTML = `<i class="bi bi-table"></i> Confluence 표 <b>${rows.length}</b>행 인식 (셀 줄바꿈·병합 유지) → 미리보기를 눌러 확인하세요`;
-    runImport(true);
+    if (rows && rows.length) {
+        e.preventDefault();
+        state.importRows = rows;
+        $('#importText').value = rows.map((r) => r.map((c) => c.replace(/\n/g, ' ⏎ ')).join('\t')).join('\n');
+        $('#importInfo').innerHTML = `<i class="bi bi-table"></i> Confluence 표 <b>${rows.length}</b>행 인식 (셀 줄바꿈·병합 유지)`;
+    } else {
+        state.importRows = null;   // 일반 텍스트(엑셀 등 탭 구분) 는 붙여넣어진 뒤 그대로 사용
+    }
+    // 붙여넣기가 textarea 에 반영된 다음 실행
+    setTimeout(() => runImport(!$('#importAuto').checked), 0);
 }
 
 async function runImport(dryRun) {
     const text = $('#importText').value;
     if (!text.trim() && !state.importRows) { toast('붙여넣을 표 내용이 없습니다', 'danger'); return; }
-    const body = { dry_run: dryRun, year: $('#importYear').value, category: $('#importCategory').value, author: $('#globalAuthor').value };
+    const useAi = $('#importAi').checked;
+    const body = { dry_run: dryRun, ai: useAi, year: $('#importYear').value, category: $('#importCategory').value, author: $('#globalAuthor').value };
     if (state.importRows) body.rows = state.importRows; else body.text = text;
+    const n = state.importRows ? state.importRows.length : text.trim().split('\n').length;
+    const started = Date.now();
+    const prog = $('#importProgress');
+    const progText = () => { $('#importProgressText').textContent = `${useAi ? 'AI 가 행마다 정리하는 중' : '읽는 중'} · 약 ${n}행 · ${Math.round((Date.now() - started) / 1000)}초`; };
+    prog.hidden = false; progText();
+    const timer = setInterval(progText, 1000);
+    $$('#importRun, #importPreview').forEach((b) => { b.disabled = true; });
     try {
         const r = await api('/api/import', { method: 'POST', body: JSON.stringify(body) });
-        const errs = r.errors.length ? `<div class="alert alert-warning py-2 small mb-2">${r.errors.map(esc).join('<br>')}</div>` : '';
-        const rows = r.preview.map((p) => `<tr>
-            <td>${statusPill({ ...p, id: '' })}</td><td>${p.work_date.slice(5)} ${shiftBadge(p.shift)}</td><td>${eqBadges(p.equipment.split(', '))}</td>
-            <td>${esc(p.title)}</td><td>${linkHtml(p.link)}</td><td class="content-cell">${sectionsHtml(p)}</td></tr>`).join('');
-        $('#importResult').innerHTML = `${errs}<div class="small mb-2">${dryRun ? `미리보기: <b>${r.parsed}</b>건 인식` : `<b class="text-success">${r.imported}건 저장 완료</b>`}</div>
-            ${rows ? `<div class="table-responsive"><table class="table table-sm small mb-0 history-table import-preview"><thead><tr><th>완료</th><th>날짜/근무</th><th>호기</th><th>작업명</th><th>링크</th><th>작업내용</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}`;
+        state.lastImport = dryRun ? null : r;
+        renderImportResult(r, dryRun);
         if (!dryRun && r.imported) {
-            toast(`${r.imported}건 가져왔습니다`);
+            toast(`${r.imported}건 등록했습니다`);
             $('#importText').value = ''; state.importRows = null; $('#importInfo').textContent = '';
         }
+    } catch (err) {
+        toast(`가져오기 실패: ${err.message}`, 'danger');
+    } finally {
+        clearInterval(timer);
+        prog.hidden = true;
+        $$('#importRun, #importPreview').forEach((b) => { b.disabled = false; });
+    }
+}
+
+function renderImportResult(r, dryRun) {
+    const engine = r.engine ? `<span class="badge text-bg-light">${r.engine === 'llm' ? 'LLM 정리' : '규칙 기반 정리'}</span>` : '';
+    const warn = r.warning ? `<div class="alert alert-warning py-1 px-2 small mb-2">${esc(r.warning)}</div>` : '';
+    const errs = r.errors.length ? `<div class="alert alert-warning py-2 small mb-2"><b>건너뛴 행</b><br>${r.errors.map(esc).join('<br>')}</div>` : '';
+    const count = dryRun ? r.preview.length : r.imported;
+    const head = `<div class="import-summary ${dryRun ? 'preview' : 'done'}">
+        <i class="bi ${dryRun ? 'bi-eye' : 'bi-check-circle-fill'}"></i>
+        <span>${dryRun ? `미리보기 <b>${count}</b>건 (아직 저장 안 됨)` : count ? `<b>${count}</b>건 등록 완료` : '새로 등록할 행이 없습니다'}
+            ${r.skipped ? ` · 이미 있는 <b>${r.skipped}</b>건 건너뜀` : ''}${r.errors.length ? ` · 오류 ${r.errors.length}행` : ''}</span> ${engine}
+        <span class="ms-auto d-flex gap-2">
+            ${dryRun && count ? '<button class="btn btn-sm btn-primary" data-import-commit><i class="bi bi-check-lg"></i> 이대로 등록</button>' : ''}
+            ${!dryRun && count ? `<button class="btn btn-sm btn-outline-danger" data-import-undo="${esc(r.batch)}"><i class="bi bi-arrow-counterclockwise"></i> 이번 가져오기 취소</button>
+                <button class="btn btn-sm btn-outline-primary" data-view="history"><i class="bi bi-table"></i> Work History 에서 보기</button>` : ''}
+        </span></div>`;
+    const rows = r.preview.map((p) => `<tr>
+        <td>${statusPill({ ...p, id: '' })}</td><td>${p.work_date.slice(5)} ${shiftBadge(p.shift)}</td><td>${eqBadges(p.equipment.split(', '))}</td>
+        <td><div class="title-cell">${esc(p.title)}</div><div class="mt-1">${catBadge(p.category)} ${linkHtml(p.link)}</div></td>
+        <td class="content-cell">${sectionsHtml(p)}</td></tr>`).join('');
+    $('#importResult').innerHTML = `${warn}${head}${errs}
+        ${rows ? `<div class="table-responsive"><table class="table table-sm mb-0 history-table import-preview">
+            <colgroup><col style="width:84px"><col style="width:80px"><col style="width:84px"><col style="width:200px"><col></colgroup>
+            <thead><tr><th>완료여부</th><th>날짜/근무</th><th>호기명</th><th>작업명 · 분류 · 링크</th><th>작업내용</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}`;
+}
+
+async function undoImport(batch) {
+    if (!confirm('이번에 가져온 기록을 모두 삭제할까요?')) return;
+    try {
+        const r = await api(`/api/import/${encodeURIComponent(batch)}`, { method: 'DELETE' });
+        toast(`${r.deleted}건 삭제했습니다`);
+        $('#importResult').innerHTML = `<div class="import-summary preview"><i class="bi bi-arrow-counterclockwise"></i> 가져오기를 취소했습니다 (${r.deleted}건 삭제)</div>`;
     } catch (err) { toast(err.message, 'danger'); }
 }
 
@@ -905,6 +953,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             else if ('newLog' in xs) newLog();
             else if ('aiUndo' in xs) undoAi();
             else if ('ai' in xs) runAi();
+            return;
+        }
+        const imp = e.target.closest('[data-import-undo],[data-import-commit]');
+        if (imp) {
+            if (imp.dataset.importUndo) undoImport(imp.dataset.importUndo); else runImport(false);
             return;
         }
         const fx = e.target.closest('[data-status],[data-shift],[data-quick],[data-toggle-status],[data-goto-ongoing]');
